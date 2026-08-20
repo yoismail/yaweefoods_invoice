@@ -1918,7 +1918,7 @@
 
                 const recentInvoices = [...state.invoices].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
                 const dueReminders = [...state.reminders].filter(r => r.status === 'Pending').sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')).slice(0, 5);
-                const lowStock = state.products.filter(p => Number(p.stock) <= 10).sort((a, b) => a.stock - b.stock).slice(0, 5);
+                const stockRows = [...state.products].sort((a, b) => Number(a.stock) - Number(b.stock)).slice(0, 6);
 
                 return `
   <div class="kpi-grid">
@@ -1982,13 +1982,18 @@
         </div>`;
                 }).join('') : `<div class="empty-state"><p>Nothing due. You're all caught up.</p></div>`}
 
-      <h3 style="margin:20px 0 10px;font-size:15px;">Low stock</h3>
-      ${lowStock.length ? lowStock.map(p => `
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;">
+        <h3 style="margin:0;font-size:15px;">Stock levels</h3>
+        <a href="#" data-nav="products" style="font-size:12.5px;font-weight:600;color:var(--forest);text-decoration:none;">View all</a>
+      </div>
+      ${stockRows.length ? stockRows.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
           <span>${escapeHtml(p.name)}</span>
-          <span class="badge low">${p.stock} ${escapeHtml(p.unit)} left</span>
+          ${Number(p.stock) <= 10
+                        ? `<span class="badge low">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))} left</span>`
+                        : `<span class="cell-muted mono">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))}</span>`}
         </div>
-      `).join('') : `<div class="empty-state" style="padding:20px;"><p>Stock levels look healthy.</p></div>`}
+      `).join('') : `<div class="empty-state" style="padding:20px;"><p>Add products to start tracking stock.</p></div>`}
     </div>
   </div>
   `;
@@ -2408,25 +2413,35 @@
             async function buildInvoicePdfBlob(inv) {
                 if (!window.html2pdf) throw new Error('PDF library not loaded');
                 const holder = document.createElement('div');
+                // Mobile Safari (and some other mobile browsers) can render an
+                // opacity:0 / off-canvas element incompletely when html2canvas captures
+                // it — that's what was clipping and garbling the downloaded PDF on
+                // phones while it looked fine on desktop. The reliable fix is to make
+                // it briefly fully visible on top of everything instead of hiding it,
+                // which every browser paints correctly. It's on screen for well under
+                // a second while the PDF is being generated.
                 holder.style.position = 'fixed';
-                holder.style.top = '0';
-                holder.style.left = '0';
-                holder.style.zIndex = '-9999';
-                holder.style.opacity = '0';
-                holder.style.pointerEvents = 'none';
+                holder.style.inset = '0';
+                holder.style.zIndex = '99999';
                 holder.style.background = '#fff';
+                holder.style.overflow = 'auto';
+                holder.style.pointerEvents = 'none';
                 holder.innerHTML = invoicePrintHtml(inv);
                 const doc = holder.firstElementChild;
                 doc.style.width = '210mm';
                 doc.style.maxWidth = 'none';
                 doc.style.padding = '16mm';
+                doc.style.margin = '0';
                 document.body.appendChild(holder);
+                // Give the browser a paint frame before capturing, so images (the logo)
+                // are guaranteed to have actually rendered on slower mobile devices.
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
                 try {
                     const blob = await window.html2pdf().from(doc).set({
                         margin: 0,
                         image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+                        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: Math.max(794, doc.scrollWidth), windowHeight: Math.max(1123, doc.scrollHeight) },
                         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
                         pagebreak: { mode: 'avoid-all' }
                     }).toPdf().output('blob');
