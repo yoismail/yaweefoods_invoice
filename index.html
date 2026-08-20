@@ -1442,6 +1442,19 @@
                     </form>
                     <div class="login-switch">Remembered it? <a id="link-back-signin">Back to log in</a></div>
                 </div>
+
+                <!-- Set new password view (landed on from the email reset link) -->
+                <div id="view-reset" class="hidden">
+                    <h2>Set a new password</h2>
+                    <p class="sub">Choose a new password for your account</p>
+                    <form id="form-reset">
+                        <div class="field"><label>New password</label><input type="password" id="rp-password"
+                                placeholder="At least 8 characters" required minlength="8"></div>
+                        <div class="field"><label>Confirm new password</label><input type="password" id="rp-password2"
+                                placeholder="Re-enter new password" required minlength="8"></div>
+                        <button type="submit" class="btn primary">Save new password</button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
@@ -1501,7 +1514,7 @@
 
             const supabase = (SUPABASE_URL.startsWith("http") && window.supabase)
                 ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-                    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+                    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
                 })
                 : null;
 
@@ -1570,7 +1583,7 @@
                     id: r.id, number: r.number, customerId: r.customer_id, issueDate: r.issue_date, dueDate: r.due_date,
                     taxRate: Number(r.tax_rate) || 0, deliveryFee: Number(r.delivery_fee) || 0, notes: r.notes || '', status: r.status, createdAt: (r.created_at || '').slice(0, 10),
                     trackingToken: r.tracking_token, viewedAt: r.viewed_at,
-                    items: (r.invoice_items || []).map(it => ({ productId: it.product_id || '', name: it.name, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }))
+                    items: (r.invoice_items || []).map(it => ({ productId: it.product_id || '', name: it.name, qty: Number(it.qty) || 0, price: Number(it.price) || 0, unit: it.unit || '' }))
                 }),
 
                 paymentToDb: p => ({ id: p.id, owner_id: state.session.id, invoice_id: p.invoiceId, amount: p.amount, date: p.date, method: p.method, note: p.note || '' }),
@@ -1653,7 +1666,7 @@
                         await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
                         if (inv.items.length) {
                             await supabase.from('invoice_items').insert(inv.items.map(it => ({
-                                invoice_id: inv.id, product_id: it.productId || null, name: it.name, qty: it.qty, price: it.price
+                                invoice_id: inv.id, product_id: it.productId || null, name: it.name, qty: it.qty, price: it.price, unit: it.unit || ''
                             })));
                         }
                     }
@@ -1723,6 +1736,31 @@
             function customerById(id) { return state.customers.find(c => c.id === id); }
             function productById(id) { return state.products.find(p => p.id === id); }
             function invoiceById(id) { return state.invoices.find(i => i.id === id); }
+
+            // Restores stock for the invoice's previous line items, then deducts stock
+            // for its new line items. Called on every create/edit/delete so stock stays
+            // accurate no matter how an invoice's quantities change over time.
+            async function adjustStockForInvoiceChange(oldItems, newItems) {
+                const deltas = {}; // productId -> net change to apply to stock
+                (oldItems || []).forEach(it => { if (it.productId) deltas[it.productId] = (deltas[it.productId] || 0) + (Number(it.qty) || 0); });
+                (newItems || []).forEach(it => { if (it.productId) deltas[it.productId] = (deltas[it.productId] || 0) - (Number(it.qty) || 0); });
+                let changed = false;
+                Object.entries(deltas).forEach(([pid, delta]) => {
+                    if (!delta) return;
+                    const p = productById(pid);
+                    if (p) { p.stock = Math.max(0, (Number(p.stock) || 0) + delta); changed = true; }
+                });
+                if (changed) await A.persist('products');
+            }
+
+            // "20 bags", "3 cases", "1 box" — simple English pluralisation good enough
+            // for common packaging words (box/boxes, case/cases, bag/bags, unit/units).
+            function pluralizeUnit(unit, qty) {
+                if (!unit) return '';
+                if (Number(qty) === 1) return unit;
+                if (/[xsz]$|[cs]h$/i.test(unit)) return unit + 'es';
+                return unit + 's';
+            }
 
             function customerStats(customerId) {
                 const invs = state.invoices.filter(i => i.customerId === customerId && i.status !== 'Cancelled');
@@ -1809,6 +1847,7 @@
             Object.assign(A, {
                 invoiceTotals, invoiceStatus, statusBadgeClass, customerById, productById, invoiceById,
                 customerStats, badge, NAV, PAGE_META, renderSidebar, goTo, render, renderTopbarActions,
+                adjustStockForInvoiceChange, pluralizeUnit,
                 pages: {}, afterRender: {}
             });
 
@@ -1998,14 +2037,17 @@
 
             /* ---------------- Invoice form (create/edit) ---------------- */
             function lineItemRow(item, idx) {
-                const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+                const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} — ${p.stock} ${escapeHtml(p.unit || 'unit')} in stock</option>`).join('');
                 const amt = (Number(item.qty) || 0) * (Number(item.price) || 0);
+                const linkedProduct = item.productId ? productById(item.productId) : null;
+                const stockHint = linkedProduct ? `<div class="cell-muted" style="font-size:11px;margin-top:3px;">${linkedProduct.stock} ${escapeHtml(linkedProduct.unit || 'unit')} in stock</div>` : '';
                 return `<tr data-row="${idx}">
     <td>
       <select class="item-product" data-idx="${idx}">
         <option value="">Custom item</option>
         ${options}
       </select>
+      ${stockHint}
     </td>
     <td><input class="item-name" data-idx="${idx}" type="text" value="${escapeHtml(item.name)}" placeholder="Item description"></td>
     <td><input class="item-qty qty-in" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></td>
@@ -2087,8 +2129,8 @@
                         sel.addEventListener('change', () => {
                             const idx = Number(sel.dataset.idx);
                             const p = productById(sel.value);
-                            if (p) { draft.items[idx].productId = p.id; draft.items[idx].name = p.name; draft.items[idx].price = p.price; }
-                            else { draft.items[idx].productId = ''; }
+                            if (p) { draft.items[idx].productId = p.id; draft.items[idx].name = p.name; draft.items[idx].price = p.price; draft.items[idx].unit = p.unit || ''; }
+                            else { draft.items[idx].productId = ''; draft.items[idx].unit = ''; }
                             refreshItemsTable();
                         });
                     });
@@ -2124,7 +2166,7 @@
                 recalcTotals(draft);
 
                 document.getElementById('add-item').addEventListener('click', () => {
-                    draft.items.push({ productId: '', name: '', qty: 1, price: 0 });
+                    draft.items.push({ productId: '', name: '', qty: 1, price: 0, unit: '' });
                     refreshItemsTable();
                     recalcTotals(draft);
                 });
@@ -2146,7 +2188,7 @@
             function openInvoiceModal(existing) {
                 const draft = existing
                     ? JSON.parse(JSON.stringify(existing))
-                    : { id: uid(), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0 }], deliveryFee: 0, taxRate: state.settings.taxRate || 20, notes: '', status: 'Draft', createdAt: todayISO() };
+                    : { id: uid(), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0, unit: '' }], deliveryFee: 0, taxRate: state.settings.taxRate || 20, notes: '', status: 'Draft', createdAt: todayISO() };
                 draft._existing = !!existing;
 
                 openModal(invoiceFormHtml(draft), {
@@ -2158,6 +2200,7 @@
                 if (window.feather) feather.replace();
 
                 wireInvoiceForm(draft, async (finalDraft) => {
+                    const oldItems = existing ? existing.items : [];
                     if (existing) {
                         const idx = state.invoices.findIndex(i => i.id === existing.id);
                         state.invoices[idx] = finalDraft;
@@ -2169,6 +2212,7 @@
                         toast('Invoice ' + finalDraft.number + ' created.');
                     }
                     await persist('invoices');
+                    await A.adjustStockForInvoiceChange(oldItems, finalDraft.items);
                     closeModal();
                     A.render();
                 });
@@ -2221,7 +2265,7 @@
       <tbody>
         ${inv.items.map(it => `<tr style="border-bottom:1px solid #F0F1EC;">
           <td style="padding:9px 4px;">${escapeHtml(it.name)}</td>
-          <td style="padding:9px 4px;text-align:right;">${it.qty}</td>
+          <td style="padding:9px 4px;text-align:right;">${it.qty}${it.unit ? ' ' + escapeHtml(A.pluralizeUnit(it.unit, it.qty)) : ''}</td>
           <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price)}</td>
           <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price)}</td>
         </tr>`).join('')}
@@ -2586,10 +2630,14 @@
   </div>
   <div class="row3">
     <div class="field"><label>Price (£)</label><input id="pf-price" type="number" min="0" step="0.01" value="${p.price}"></div>
-    <div class="field"><label>Unit</label><input id="pf-unit" type="text" value="${escapeHtml(p.unit)}" placeholder="bag, case, unit"></div>
+    <div class="field">
+      <label>Unit</label>
+      <input id="pf-unit" type="text" value="${escapeHtml(p.unit)}" placeholder="box, case, bag, kg">
+      <div class="hint">How it's sold — shows on every invoice, e.g. "20 boxes" instead of just "20".</div>
+    </div>
     <div class="field"><label>Stock quantity</label><input id="pf-stock" type="number" min="0" step="1" value="${p.stock}"></div>
   </div>
-  <div class="field"><label>Description</label><textarea id="pf-desc" placeholder="Short product description">${escapeHtml(p.description)}</textarea></div>
+  <div class="field"><label>Description</label><textarea id="pf-desc" placeholder="Short product description, e.g. 'Sold in cases of 12, keep refrigerated'">${escapeHtml(p.description)}</textarea></div>
   `;
             }
             function openProductModal(existing) {
@@ -2632,13 +2680,31 @@
 
             /* ================= PAYMENTS ================= */
             A.pages.payments = function () {
-                const f = state.filters.payments;
                 const unpaidInvoices = state.invoices.filter(i => i.status !== 'Cancelled' && invoiceTotals(i).balance > 0.004);
                 const totalReceived = state.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
                 const totalOutstanding = unpaidInvoices.reduce((s, i) => s + invoiceTotals(i).balance, 0);
                 const totalOverdue = state.invoices.filter(i => invoiceStatus(i) === 'Overdue').reduce((s, i) => s + invoiceTotals(i).balance, 0);
 
-                let rows = [...state.payments].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                // Group activity by customer: anyone with at least one invoice or payment.
+                const byCustomer = {};
+                state.invoices.forEach(inv => {
+                    if (!inv.customerId) return;
+                    if (!byCustomer[inv.customerId]) byCustomer[inv.customerId] = { invoiceCount: 0, paymentCount: 0, totalPaid: 0, lastActivity: '' };
+                    byCustomer[inv.customerId].invoiceCount++;
+                    if (inv.createdAt > byCustomer[inv.customerId].lastActivity) byCustomer[inv.customerId].lastActivity = inv.createdAt;
+                });
+                state.payments.forEach(p => {
+                    const inv = invoiceById(p.invoiceId);
+                    if (!inv || !inv.customerId) return;
+                    if (!byCustomer[inv.customerId]) byCustomer[inv.customerId] = { invoiceCount: 0, paymentCount: 0, totalPaid: 0, lastActivity: '' };
+                    byCustomer[inv.customerId].paymentCount++;
+                    byCustomer[inv.customerId].totalPaid += Number(p.amount || 0);
+                    if (p.date > byCustomer[inv.customerId].lastActivity) byCustomer[inv.customerId].lastActivity = p.date;
+                });
+                const customerRows = Object.entries(byCustomer)
+                    .map(([cid, stats]) => ({ customer: customerById(cid), ...stats }))
+                    .filter(r => r.customer)
+                    .sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
 
                 return `
   <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
@@ -2649,26 +2715,23 @@
 
   <div class="row2">
     <div class="card card-pad">
-      <h3 style="margin:0 0 14px;font-size:15px;">Payment history</h3>
-      ${rows.length ? `
+      <h3 style="margin:0 0 4px;font-size:15px;">Payment &amp; invoice history by customer</h3>
+      <p class="cell-muted" style="font-size:12.5px;margin:0 0 14px;">Tap a customer to see everything they've been invoiced and paid.</p>
+      ${customerRows.length ? `
       <div class="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>Method</th><th>Amount</th><th></th></tr></thead>
+        <thead><tr><th>Customer</th><th>Invoices</th><th>Payments</th><th>Total paid</th><th>Last activity</th><th></th></tr></thead>
         <tbody>
-          ${rows.map(p => {
-                    const inv = invoiceById(p.invoiceId);
-                    const c = inv ? customerById(inv.customerId) : null;
-                    return `<tr>
-              <td class="cell-muted">${fmtDate(p.date)}</td>
-              <td class="mono">${inv ? escapeHtml(inv.number) : '—'}</td>
-              <td>${c ? escapeHtml(c.name) : '—'}</td>
-              <td class="cell-muted">${escapeHtml(p.method || '—')}</td>
-              <td class="mono cell-strong">${money(p.amount)}</td>
-              <td><button class="btn sm ghost" data-action="delete-payment" data-id="${p.id}" title="Delete"><svg class="icon" data-feather="trash-2"></svg></button></td>
-            </tr>`;
-                }).join('')}
+          ${customerRows.map(r => `<tr style="cursor:pointer;" data-action="view-customer-history" data-id="${r.customer.id}">
+            <td class="cell-strong">${escapeHtml(r.customer.name)}</td>
+            <td>${r.invoiceCount}</td>
+            <td>${r.paymentCount}</td>
+            <td class="mono">${money(r.totalPaid)}</td>
+            <td class="cell-muted">${fmtDate(r.lastActivity)}</td>
+            <td><svg class="icon" data-feather="chevron-right" style="color:var(--muted-2);"></svg></td>
+          </tr>`).join('')}
         </tbody>
       </table></div>
-      ` : `<div class="empty-state"><svg data-feather="credit-card"></svg><h3>No payments recorded</h3><p>Record a payment against an invoice to see it here.</p></div>`}
+      ` : `<div class="empty-state"><svg data-feather="users"></svg><h3>No customer activity yet</h3><p>Invoices and payments will show up here grouped by customer.</p></div>`}
     </div>
 
     <div class="card card-pad">
@@ -2691,15 +2754,74 @@
   </div>`;
             };
 
-            function paymentFormHtml(draft) {
-                const unpaid = state.invoices.filter(i => i.status !== 'Cancelled' && invoiceTotals(i).balance > 0.004);
+            /* ---------------- Customer drill-down: their invoices + payments together ---------------- */
+            function openCustomerHistoryModal(customerId) {
+                const c = customerById(customerId);
+                if (!c) return;
+                const invoices = state.invoices.filter(i => i.customerId === customerId).sort((a, b) => (b.issueDate || '').localeCompare(a.issueDate || ''));
+                const payments = state.payments.filter(p => { const inv = invoiceById(p.invoiceId); return inv && inv.customerId === customerId; }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+                openModal(`
+    <h4 style="margin:0 0 14px;font-size:14px;">Invoices</h4>
+    ${invoices.length ? `
+    <div class="table-wrap" style="margin-bottom:26px;"><table>
+      <thead><tr><th>Number</th><th>Date</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${invoices.map(inv => {
+                    const t = invoiceTotals(inv);
+                    return `<tr>
+            <td class="mono cell-strong">${escapeHtml(inv.number)}</td>
+            <td class="cell-muted">${fmtDate(inv.issueDate)}</td>
+            <td class="mono">${money(t.total)}</td>
+            <td class="mono">${t.balance > 0 ? money(t.balance) : '<span class="cell-muted">—</span>'}</td>
+            <td>${badge(invoiceStatus(inv))}</td>
+            <td><button class="btn sm ghost" data-action="view-invoice" data-id="${inv.id}" title="View"><svg class="icon" data-feather="eye"></svg></button></td>
+          </tr>`;
+                }).join('')}
+      </tbody>
+    </table></div>` : `<p class="cell-muted" style="font-size:13px;margin:0 0 26px;">No invoices for this customer yet.</p>`}
+
+    <h4 style="margin:0 0 14px;font-size:14px;">Payments</h4>
+    ${payments.length ? `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Invoice</th><th>Method</th><th>Amount</th><th></th></tr></thead>
+      <tbody>
+        ${payments.map(p => {
+                    const inv = invoiceById(p.invoiceId);
+                    return `<tr>
+            <td class="cell-muted">${fmtDate(p.date)}</td>
+            <td class="mono">${inv ? escapeHtml(inv.number) : '—'}</td>
+            <td class="cell-muted">${escapeHtml(p.method || '—')}</td>
+            <td class="mono cell-strong">${money(p.amount)}</td>
+            <td><div class="row-actions">
+              <button class="btn sm ghost" data-action="edit-payment" data-id="${p.id}" title="Edit"><svg class="icon" data-feather="edit-2"></svg></button>
+              <button class="btn sm ghost" data-action="delete-payment" data-id="${p.id}" title="Delete"><svg class="icon" data-feather="trash-2"></svg></button>
+            </div></td>
+          </tr>`;
+                }).join('')}
+      </tbody>
+    </table></div>` : `<p class="cell-muted" style="font-size:13px;margin:0;">No payments recorded for this customer yet.</p>`}
+  `, {
+                    title: c.name,
+                    wide: true,
+                    foot: '<button class="btn ghost" id="modal-cancel">Close</button><button class="btn primary" data-action="new-payment-for-customer" data-id="' + c.id + '"><svg class="icon" data-feather="plus"></svg> Record payment</button>'
+                });
+                document.getElementById('modal-cancel').addEventListener('click', closeModal);
+                if (window.feather) feather.replace();
+            }
+            A.openCustomerHistoryModal = openCustomerHistoryModal;
+
+            function paymentFormHtml(draft, isEdit) {
+                // While editing a payment, its own invoice may show as "settled" once this
+                // payment is counted — always include it so it stays selectable.
+                const unpaid = state.invoices.filter(i => i.status !== 'Cancelled' && (invoiceTotals(i).balance > 0.004 || i.id === draft.invoiceId));
                 const options = unpaid.map(inv => {
                     const c = customerById(inv.customerId);
                     const bal = invoiceTotals(inv).balance;
                     return `<option value="${inv.id}" ${draft.invoiceId === inv.id ? 'selected' : ''}>${escapeHtml(inv.number)} — ${escapeHtml(c ? c.name : '')} (${money(bal)} due)</option>`;
                 }).join('');
                 return `
-  <div class="field"><label>Invoice</label><select id="pf-invoice">${unpaid.length ? '<option value="">Select an unpaid invoice</option>' + options : '<option value="">No unpaid invoices</option>'}</select></div>
+  <div class="field"><label>Invoice</label><select id="pf-invoice">${unpaid.length ? '<option value="">Select an invoice</option>' + options : '<option value="">No unpaid invoices</option>'}</select></div>
   <div class="row2">
     <div class="field"><label>Amount (£)</label><input id="pf-amount" type="number" min="0" step="0.01" value="${draft.amount || ''}"></div>
     <div class="field"><label>Date received</label><input id="pf-date" type="date" value="${draft.date}"></div>
@@ -2708,23 +2830,27 @@
     ${['Bank transfer', 'Card', 'Cash', 'Cheque', 'Other'].map(m => `<option ${draft.method === m ? 'selected' : ''}>${m}</option>`).join('')}
   </select></div>
   <div class="field"><label>Note</label><textarea id="pf-note" placeholder="Optional reference">${escapeHtml(draft.note || '')}</textarea></div>
+  ${isEdit ? `<p class="cell-muted" style="font-size:12px;margin:-6px 0 0;">Editing this recalculates the invoice's balance immediately.</p>` : ''}
   `;
             }
-            function openPaymentModal(invoiceId) {
-                const draft = { id: uid('pay'), invoiceId: invoiceId || '', amount: '', date: todayISO(), method: 'Bank transfer', note: '' };
-                if (invoiceId) {
+            function openPaymentModal(invoiceId, existingPayment) {
+                const isEdit = !!existingPayment;
+                const draft = existingPayment
+                    ? { ...existingPayment }
+                    : { id: uid(), invoiceId: invoiceId || '', amount: '', date: todayISO(), method: 'Bank transfer', note: '' };
+                if (!isEdit && invoiceId) {
                     const t = invoiceTotals(invoiceById(invoiceId));
                     draft.amount = t.balance.toFixed(2);
                 }
-                openModal(paymentFormHtml(draft), {
-                    title: 'Record payment',
-                    foot: '<button class="btn ghost" id="modal-cancel">Cancel</button><button class="btn primary" id="modal-save">Record payment</button>'
+                openModal(paymentFormHtml(draft, isEdit), {
+                    title: isEdit ? 'Edit payment' : 'Record payment',
+                    foot: '<button class="btn ghost" id="modal-cancel">Cancel</button><button class="btn primary" id="modal-save">' + (isEdit ? 'Save changes' : 'Record payment') + '</button>'
                 });
                 document.getElementById('modal-cancel').addEventListener('click', closeModal);
                 const invoiceSelect = document.getElementById('pf-invoice');
                 invoiceSelect.addEventListener('change', () => {
                     const inv = invoiceById(invoiceSelect.value);
-                    if (inv) document.getElementById('pf-amount').value = invoiceTotals(inv).balance.toFixed(2);
+                    if (inv && !isEdit) document.getElementById('pf-amount').value = invoiceTotals(inv).balance.toFixed(2);
                 });
                 document.getElementById('modal-save').addEventListener('click', async () => {
                     draft.invoiceId = document.getElementById('pf-invoice').value;
@@ -2734,9 +2860,15 @@
                     draft.note = document.getElementById('pf-note').value.trim();
                     if (!draft.invoiceId) { toast('Choose an invoice.', 'error'); return; }
                     if (draft.amount <= 0) { toast('Enter an amount greater than zero.', 'error'); return; }
-                    state.payments.push(draft);
+                    if (isEdit) {
+                        const idx = state.payments.findIndex(p => p.id === draft.id);
+                        if (idx > -1) state.payments[idx] = draft;
+                        toast('Payment updated.');
+                    } else {
+                        state.payments.push(draft);
+                        toast('Payment recorded.');
+                    }
                     await persist('payments');
-                    toast('Payment recorded.');
                     closeModal();
                     A.render();
                 });
@@ -3055,7 +3187,7 @@
 
             /* ---------------- Auth views ---------------- */
             function showView(name) {
-                ['signin', 'signup', 'forgot'].forEach(v => {
+                ['signin', 'signup', 'forgot', 'reset'].forEach(v => {
                     document.getElementById('view-' + v).classList.toggle('hidden', v !== name);
                 });
                 document.getElementById('login-error').classList.remove('show');
@@ -3126,8 +3258,23 @@
                     if (!supabase) return;
                     const email = document.getElementById('fp-email').value.trim();
                     document.getElementById('login-error').classList.remove('show');
-                    await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
+                    const cleanUrl = window.location.origin + window.location.pathname;
+                    await supabase.auth.resetPasswordForEmail(email, { redirectTo: cleanUrl });
                     loginToast('If an account exists for that email, reset instructions have been sent.');
+                });
+
+                document.getElementById('form-reset').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    if (!supabase) return;
+                    const password = document.getElementById('rp-password').value;
+                    const password2 = document.getElementById('rp-password2').value;
+                    if (password.length < 8) { loginError('Password must be at least 8 characters.'); return; }
+                    if (password !== password2) { loginError('Passwords do not match.'); return; }
+                    const { error } = await supabase.auth.updateUser({ password });
+                    if (error) { loginError(error.message); return; }
+                    cleanRecoveryParamsFromUrl();
+                    toast('Password updated.');
+                    await enterApp();
                 });
 
                 document.getElementById('btn-logout').addEventListener('click', async () => {
@@ -3136,6 +3283,36 @@
                     document.getElementById('login-screen').classList.remove('hidden');
                     showView('signin');
                 });
+
+                // A password-recovery link establishes a real (temporary) session the
+                // moment supabase-js parses it from the URL — before our own init() logic
+                // has run its course. Catch that moment and route to the reset form
+                // instead of letting the normal "has a session, show the dashboard" path
+                // silently take over, which is what was sending recovery links straight
+                // to a logged-in dashboard instead of a password field.
+                if (supabase) {
+                    supabase.auth.onAuthStateChange((event) => {
+                        if (event === 'PASSWORD_RECOVERY') {
+                            document.getElementById('app-loading').classList.add('hidden');
+                            document.getElementById('app-shell').classList.add('hidden');
+                            document.getElementById('login-screen').classList.remove('hidden');
+                            showView('reset');
+                        }
+                    });
+                }
+            }
+
+            // Supabase recovery links land with #access_token=...&type=recovery (or a
+            // ?code=... in newer PKCE-style links) in the URL. Detect either so a
+            // refresh mid-flow still shows the reset form rather than the dashboard.
+            function isPasswordRecoveryUrl() {
+                const hash = window.location.hash || '';
+                const search = window.location.search || '';
+                return /type=recovery/.test(hash) || /type=recovery/.test(search);
+            }
+            function cleanRecoveryParamsFromUrl() {
+                const url = new URL(window.location.href);
+                window.history.replaceState({}, '', url.origin + url.pathname);
             }
 
             async function loadPublicStats() {
@@ -3176,10 +3353,13 @@
                     if (action === 'share-email') return A.shareInvoiceAs(invoiceById(id), 'email');
                     if (action === 'copy-track-link') return A.copyTrackingLink(actEl.dataset.link);
                     if (action === 'delete-invoice') {
-                        if (confirm('Delete this invoice? This also removes any linked payments.')) {
+                        if (confirm('Delete this invoice? This also removes any linked payments and returns its items to stock.')) {
+                            const inv = invoiceById(id);
+                            const oldItems = inv ? inv.items : [];
                             state.invoices = state.invoices.filter(i => i.id !== id);
                             state.payments = state.payments.filter(p => p.invoiceId !== id);
                             await persist('invoices'); await persist('payments');
+                            await A.adjustStockForInvoiceChange(oldItems, []);
                             toast('Invoice deleted.'); render();
                         }
                         return;
@@ -3207,6 +3387,14 @@
                     }
 
                     if (action === 'new-payment') return openPaymentModal(null);
+                    if (action === 'edit-payment') return openPaymentModal(null, state.payments.find(p => p.id === id));
+                    if (action === 'new-payment-for-customer') {
+                        // Suggest that customer's oldest unpaid invoice as a starting point, if they have one.
+                        const inv = state.invoices.find(i => i.customerId === id && i.status !== 'Cancelled' && A.invoiceTotals(i).balance > 0.004);
+                        closeModal();
+                        return openPaymentModal(inv ? inv.id : null);
+                    }
+                    if (action === 'view-customer-history') return A.openCustomerHistoryModal(id);
                     if (action === 'delete-payment') {
                         if (confirm('Delete this payment record?')) {
                             state.payments = state.payments.filter(p => p.id !== id);
@@ -3332,7 +3520,7 @@
       </tr></thead>
       <tbody>${items.map(it => `<tr style="border-bottom:1px solid #F0F1EC;">
         <td style="padding:9px 4px;">${escapeHtml(it.name)}</td>
-        <td style="padding:9px 4px;text-align:right;">${it.qty}</td>
+        <td style="padding:9px 4px;text-align:right;">${it.qty}${it.unit ? ' ' + escapeHtml(A.pluralizeUnit(it.unit, it.qty)) : ''}</td>
         <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price)}</td>
         <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price)}</td>
       </tr>`).join('')}</tbody>
@@ -3363,7 +3551,14 @@
 
                 await loadAll();
                 document.getElementById('app-loading').classList.add('hidden');
-                if (state.session) {
+                if (isPasswordRecoveryUrl()) {
+                    // supabase-js has already exchanged the link for a session by this point,
+                    // but the person came here to set a new password, not to land in the
+                    // dashboard — show the reset form regardless of session state.
+                    document.getElementById('app-shell').classList.add('hidden');
+                    document.getElementById('login-screen').classList.remove('hidden');
+                    showView('reset');
+                } else if (state.session) {
                     document.getElementById('login-screen').classList.add('hidden');
                     document.getElementById('app-shell').classList.remove('hidden');
                     wireMobileNav();
