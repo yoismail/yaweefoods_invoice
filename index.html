@@ -13,6 +13,7 @@
         rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.0/feather.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         :root {
             --forest: #123B24;
@@ -1497,10 +1498,10 @@
                 productToDb: p => ({ id: p.id, owner_id: state.session.id, name: p.name, sku: p.sku, category: p.category, price: p.price, unit: p.unit, stock: p.stock, description: p.description }),
                 productFromDb: r => ({ id: r.id, name: r.name, sku: r.sku || '', category: r.category || '', price: Number(r.price) || 0, unit: r.unit || 'unit', stock: Number(r.stock) || 0, description: r.description || '' }),
 
-                invoiceToDb: i => ({ id: i.id, owner_id: state.session.id, number: i.number, customer_id: i.customerId || null, issue_date: i.issueDate || null, due_date: i.dueDate || null, tax_rate: i.taxRate, notes: i.notes || '', status: i.status }),
+                invoiceToDb: i => ({ id: i.id, owner_id: state.session.id, number: i.number, customer_id: i.customerId || null, issue_date: i.issueDate || null, due_date: i.dueDate || null, tax_rate: i.taxRate, delivery_fee: i.deliveryFee || 0, notes: i.notes || '', status: i.status }),
                 invoiceFromDb: r => ({
                     id: r.id, number: r.number, customerId: r.customer_id, issueDate: r.issue_date, dueDate: r.due_date,
-                    taxRate: Number(r.tax_rate) || 0, notes: r.notes || '', status: r.status, createdAt: (r.created_at || '').slice(0, 10),
+                    taxRate: Number(r.tax_rate) || 0, deliveryFee: Number(r.delivery_fee) || 0, notes: r.notes || '', status: r.status, createdAt: (r.created_at || '').slice(0, 10),
                     trackingToken: r.tracking_token, viewedAt: r.viewed_at,
                     items: (r.invoice_items || []).map(it => ({ productId: it.product_id || '', name: it.name, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }))
                 }),
@@ -1630,15 +1631,20 @@
             /* ---------------- Computed helpers ---------------- */
             function invoiceTotals(inv) {
                 const subtotal = inv.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
-                const tax = subtotal * (Number(inv.taxRate) || 0) / 100;
-                const total = subtotal + tax;
+                const deliveryFee = Number(inv.deliveryFee) || 0;
+                const tax = (subtotal + deliveryFee) * (Number(inv.taxRate) || 0) / 100;
+                const total = subtotal + deliveryFee + tax;
                 const paid = state.payments.filter(p => p.invoiceId === inv.id).reduce((s, p) => s + Number(p.amount || 0), 0);
                 const balance = Math.max(0, total - paid);
-                return { subtotal, tax, total, paid, balance };
+                return { subtotal, deliveryFee, tax, total, paid, balance };
             }
             function invoiceStatus(inv) {
+                // Draft, Paid and Cancelled are always whatever was explicitly set.
                 if (inv.status === 'Draft') return 'Draft';
                 if (inv.status === 'Cancelled') return 'Cancelled';
+                if (inv.status === 'Paid') return 'Paid';
+                // Anything else ("Sent") auto-reflects reality: overdue once the due date has passed
+                // with a balance owing, paid once payments clear the balance, sent otherwise.
                 const { balance } = invoiceTotals(inv);
                 if (balance <= 0.004) return 'Paid';
                 if (inv.dueDate && inv.dueDate < todayISO()) return 'Overdue';
@@ -1859,6 +1865,8 @@
             const { state, money, fmtDate, todayISO, addDays, escapeHtml, uid, invoiceTotals, invoiceStatus, badge,
                 customerById, productById, invoiceById, openModal, closeModal, toast, persist } = A;
 
+            const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Cancelled'];
+
             /* ---------------- Invoices: list page ---------------- */
             A.pages.invoices = function () {
                 const f = state.filters.invoices;
@@ -1902,7 +1910,7 @@
             <td class="mono">${t.balance > 0 ? money(t.balance) : '<span class="cell-muted">—</span>'}</td>
             <td>${badge(st)}</td>
             <td><div class="row-actions">
-              <button class="btn sm ghost" data-action="view-invoice" data-id="${inv.id}" title="View / print"><svg class="icon" data-feather="eye"></svg></button>
+              <button class="btn sm ghost" data-action="view-invoice" data-id="${inv.id}" title="View, share or download"><svg class="icon" data-feather="eye"></svg></button>
               <button class="btn sm ghost" data-action="edit-invoice" data-id="${inv.id}" title="Edit"><svg class="icon" data-feather="edit-2"></svg></button>
               <button class="btn sm ghost" data-action="delete-invoice" data-id="${inv.id}" title="Delete"><svg class="icon" data-feather="trash-2"></svg></button>
             </div></td>
@@ -1943,11 +1951,14 @@
             function invoiceFormHtml(draft) {
                 const custOptions = state.customers.map(c => `<option value="${c.id}" ${draft.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
                 return `
-  <div class="row2">
+  <div class="row3">
     <div class="field"><label>Customer</label>
       <select id="f-customer">${state.customers.length ? '<option value="">Select a customer</option>' + custOptions : '<option value="">No customers yet, add one first</option>'}</select>
     </div>
     <div class="field"><label>Invoice number</label><input id="f-number" type="text" value="${escapeHtml(draft.number)}" ${draft._existing ? '' : 'readonly'}></div>
+    <div class="field"><label>Status</label>
+      <select id="f-status">${INVOICE_STATUSES.map(s => `<option value="${s}" ${draft.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
+    </div>
   </div>
   <div class="row2">
     <div class="field"><label>Issue date</label><input id="f-issue" type="date" value="${draft.issueDate}"></div>
@@ -1964,8 +1975,10 @@
   <button type="button" class="btn sm ghost" id="add-item"><svg class="icon" data-feather="plus"></svg> Add line item</button>
 
   <div class="totals-box">
-    <div class="field" style="margin:14px 0 6px;"><label>Tax rate (%)</label><input id="f-taxrate" type="number" min="0" step="0.1" value="${draft.taxRate}"></div>
+    <div class="field" style="margin:14px 0 6px;"><label>Delivery fee (£)</label><input id="f-delivery" type="number" min="0" step="0.01" value="${draft.deliveryFee || 0}"></div>
+    <div class="field" style="margin:0 0 6px;"><label>Tax rate (%)</label><input id="f-taxrate" type="number" min="0" step="0.1" value="${draft.taxRate}"></div>
     <div class="tline"><span>Subtotal</span><span id="calc-subtotal" class="mono"></span></div>
+    <div class="tline"><span>Delivery</span><span id="calc-delivery" class="mono"></span></div>
     <div class="tline"><span>Tax</span><span id="calc-tax" class="mono"></span></div>
     <div class="tline grand"><span>Total</span><span id="calc-total" class="mono"></span></div>
   </div>
@@ -1977,8 +1990,10 @@
             function readDraftFromForm(draft) {
                 draft.customerId = document.getElementById('f-customer').value;
                 draft.number = document.getElementById('f-number').value.trim();
+                draft.status = document.getElementById('f-status').value;
                 draft.issueDate = document.getElementById('f-issue').value;
                 draft.dueDate = document.getElementById('f-due').value;
+                draft.deliveryFee = Number(document.getElementById('f-delivery').value) || 0;
                 draft.taxRate = Number(document.getElementById('f-taxrate').value) || 0;
                 draft.notes = document.getElementById('f-notes').value;
                 return draft;
@@ -1986,17 +2001,19 @@
 
             function recalcTotals(draft) {
                 const subtotal = draft.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
-                const tax = subtotal * (Number(draft.taxRate) || 0) / 100;
-                const total = subtotal + tax;
+                const deliveryFee = Number(draft.deliveryFee) || 0;
+                const tax = (subtotal + deliveryFee) * (Number(draft.taxRate) || 0) / 100;
+                const total = subtotal + deliveryFee + tax;
                 const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
                 set('calc-subtotal', money(subtotal));
+                set('calc-delivery', money(deliveryFee));
                 set('calc-tax', money(tax));
                 set('calc-total', money(total));
             }
 
             function wireInvoiceForm(draft, onSave) {
-                const taxInput = document.getElementById('f-taxrate');
-                taxInput.addEventListener('input', () => { draft.taxRate = Number(taxInput.value) || 0; recalcTotals(draft); });
+                document.getElementById('f-taxrate').addEventListener('input', (e) => { draft.taxRate = Number(e.target.value) || 0; recalcTotals(draft); });
+                document.getElementById('f-delivery').addEventListener('input', (e) => { draft.deliveryFee = Number(e.target.value) || 0; recalcTotals(draft); });
 
                 function rebindItemRows() {
                     document.querySelectorAll('.item-product').forEach(sel => {
@@ -2062,7 +2079,7 @@
             function openInvoiceModal(existing) {
                 const draft = existing
                     ? JSON.parse(JSON.stringify(existing))
-                    : { id: uid('inv'), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0 }], taxRate: state.settings.taxRate || 20, notes: '', status: 'Draft', createdAt: todayISO() };
+                    : { id: uid(), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0 }], deliveryFee: 0, taxRate: state.settings.taxRate || 20, notes: '', status: 'Draft', createdAt: todayISO() };
                 draft._existing = !!existing;
 
                 openModal(invoiceFormHtml(draft), {
@@ -2079,7 +2096,6 @@
                         state.invoices[idx] = finalDraft;
                         toast('Invoice ' + finalDraft.number + ' updated.');
                     } else {
-                        finalDraft.status = 'Draft';
                         state.invoices.push(finalDraft);
                         state.settings.nextInvoiceSeq = (state.settings.nextInvoiceSeq || (state.invoices.length)) + 1;
                         await persist('settings');
@@ -2091,13 +2107,16 @@
                 });
             }
 
-            /* ---------------- Invoice view / print ---------------- */
+            /* ---------------- Invoice document (used for the modal preview AND the PDF) ----------------
+               A fixed A4-shaped page: header and line items at the top, totals and the
+               thank-you note pinned to the very bottom via a flex spacer, the way a
+               printed invoice is laid out. ---------------- */
             function invoicePrintHtml(inv) {
                 const c = customerById(inv.customerId);
                 const t = invoiceTotals(inv);
                 const s = state.settings;
                 return `
-  <div style="font-family:'Inter',sans-serif;color:#12140F;max-width:720px;">
+  <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:210mm;min-height:297mm;box-sizing:border-box;padding:16mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #123B24;padding-bottom:18px;margin-bottom:22px;">
       <div style="display:flex;gap:12px;align-items:center;">
         <img src="data:image/png;base64,${window.YAWEE_LOGO_B64}" style="width:50px;height:50px;object-fit:contain;">
@@ -2141,45 +2160,132 @@
         </tr>`).join('')}
       </tbody>
     </table>
-    <div style="margin-left:auto;width:240px;">
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(t.subtotal)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax (${inv.taxRate}%)</span><span style="font-family:monospace;">${money(t.tax)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #123B24;margin-top:4px;font-weight:700;font-size:15px;"><span>Total due</span><span style="font-family:monospace;">${money(t.total)}</span></div>
-      ${t.paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;color:#68705F;"><span>Paid</span><span style="font-family:monospace;">${money(t.paid)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;"><span>Balance</span><span style="font-family:monospace;">${money(t.balance)}</span></div>` : ''}
+
+    <div style="flex:1;"></div>
+
+    <div>
+      <div style="margin-left:auto;width:260px;">
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(t.subtotal)}</span></div>
+        ${t.deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(t.deliveryFee)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax (${inv.taxRate}%)</span><span style="font-family:monospace;">${money(t.tax)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #123B24;margin-top:4px;font-weight:700;font-size:16px;"><span>Total due</span><span style="font-family:monospace;">${money(t.total)}</span></div>
+        ${t.paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;color:#68705F;"><span>Paid</span><span style="font-family:monospace;">${money(t.paid)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;"><span>Balance</span><span style="font-family:monospace;">${money(t.balance)}</span></div>` : ''}
+      </div>
+      ${inv.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b style="color:#12140F;">Notes: </b>${escapeHtml(inv.notes)}</div>` : ''}
+      <div style="margin-top:20px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
     </div>
-    ${inv.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b style="color:#12140F;">Notes: </b>${escapeHtml(inv.notes)}</div>` : ''}
-    <div style="margin-top:30px;font-size:11.5px;color:#8A9080;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
   </div>`;
             }
 
+            /* ---------------- Invoice view: status control, download, share ---------------- */
             function openInvoiceView(inv) {
                 const c = customerById(inv.customerId);
-                const t = invoiceTotals(inv);
                 const trackLink = inv.trackingToken ? (window.location.origin + window.location.pathname + '?track=' + inv.trackingToken) : null;
-                const linkHtml = trackLink ? `<div style="margin-top:18px;padding:10px 14px;background:#F5F7F2;border-radius:8px;font-size:12px;color:#68705F;word-break:break-all;"><b style="color:#12140F;">Shareable link: </b>${escapeHtml(trackLink)}</div>` : '';
-                openModal(invoicePrintHtml(inv) + linkHtml, {
+                const linkHtml = trackLink ? `<div style="max-width:210mm;margin:14px auto 0;padding:10px 14px;background:#F5F7F2;border-radius:8px;font-size:12px;color:#68705F;word-break:break-all;"><b style="color:#12140F;">Shareable link: </b>${escapeHtml(trackLink)}</div>` : '';
+
+                const statusBar = `
+    <div style="max-width:210mm;margin:0 auto 14px;display:flex;align-items:center;gap:10px;">
+      <label style="font-size:12.5px;font-weight:600;color:var(--muted);">Status</label>
+      <select id="status-quickchange" style="max-width:160px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
+        ${INVOICE_STATUSES.map(s => `<option value="${s}" ${inv.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:var(--muted-2);">Overdue shows automatically once a Sent invoice passes its due date with a balance owing.</span>
+    </div>`;
+
+                openModal(statusBar + '<div style="overflow-x:auto;">' + invoicePrintHtml(inv) + '</div>' + linkHtml, {
                     title: 'Invoice ' + inv.number,
                     wide: true,
                     foot: `
       <button class="btn ghost" id="modal-cancel">Close</button>
-      <button class="btn" data-action="print-invoice" data-id="${inv.id}"><svg class="icon" data-feather="printer"></svg> Print / save PDF</button>
-      <button class="btn" data-action="send-invoice-email" data-id="${inv.id}" ${c && c.email ? '' : 'disabled title="No email on file"'}><svg class="icon" data-feather="mail"></svg> Email invoice</button>
-      <button class="btn" data-action="send-invoice-whatsapp" data-id="${inv.id}" ${c && c.phone ? '' : 'disabled title="No phone on file"'}><svg class="icon" data-feather="message-circle"></svg> WhatsApp (auto)</button>
-      <button class="btn ghost" data-action="send-invoice-whatsapp-fallback" data-id="${inv.id}" ${c && c.phone ? '' : 'disabled title="No phone on file"'} title="Open WhatsApp Web with the message pre-filled, no setup required"><svg class="icon" data-feather="external-link"></svg> Open in WhatsApp</button>
-      ${t.balance > 0 && inv.status !== 'Cancelled' ? `<button class="btn primary" data-action="record-payment-for" data-id="${inv.id}"><svg class="icon" data-feather="check"></svg> Record payment</button>` : ''}
+      <button class="btn" data-action="download-invoice-pdf" data-id="${inv.id}"><svg class="icon" data-feather="download"></svg> Download PDF</button>
+      <button class="btn primary" data-action="open-share-menu" data-id="${inv.id}"><svg class="icon" data-feather="share-2"></svg> Share invoice</button>
+      ${invoiceTotals(inv).balance > 0 && inv.status !== 'Cancelled' ? `<button class="btn accent" data-action="record-payment-for" data-id="${inv.id}"><svg class="icon" data-feather="check"></svg> Record payment</button>` : ''}
     `
+                });
+                document.getElementById('modal-cancel').addEventListener('click', closeModal);
+                document.getElementById('status-quickchange').addEventListener('change', async (e) => {
+                    inv.status = e.target.value;
+                    await persist('invoices');
+                    toast('Status updated to ' + inv.status + '.');
+                    closeModal();
+                    A.render();
+                });
+                if (window.feather) feather.replace();
+            }
+
+            /* ---------------- Download as a real PDF file, named after the business + invoice number ---------------- */
+            function downloadInvoicePdf(inv) {
+                if (!window.html2pdf) { toast('PDF library did not load, check your connection and try again.', 'error'); return; }
+                const holder = document.createElement('div');
+                holder.style.position = 'fixed';
+                holder.style.left = '-10000px';
+                holder.style.top = '0';
+                holder.innerHTML = invoicePrintHtml(inv);
+                document.body.appendChild(holder);
+
+                const safeName = (state.settings.companyName + '-' + inv.number).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+                toast('Preparing PDF…');
+                window.html2pdf().from(holder.firstElementChild).set({
+                    margin: 0,
+                    filename: safeName + '.pdf',
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                }).save().then(() => {
+                    document.body.removeChild(holder);
+                }).catch(() => {
+                    document.body.removeChild(holder);
+                    toast('Could not generate the PDF.', 'error');
+                });
+            }
+
+            /* ---------------- Share: WhatsApp or email, no backend required ---------------- */
+            function shareMessage(inv) {
+                const c = customerById(inv.customerId);
+                const trackLink = inv.trackingToken ? (window.location.origin + window.location.pathname + '?track=' + inv.trackingToken) : window.location.href;
+                return {
+                    customer: c,
+                    subject: `Invoice ${inv.number} from ${state.settings.companyName}`,
+                    body: `Hello ${c ? c.name : ''},\n\nYour invoice ${inv.number} from ${state.settings.companyName} is ready to view:\n${trackLink}\n\nThank you for your business.\n${state.settings.companyName}`
+                };
+            }
+            function openShareMenu(inv) {
+                const c = customerById(inv.customerId);
+                openModal(`
+    <p style="font-size:13.5px;color:var(--muted);margin:0 0 16px;">Choose how to send invoice ${escapeHtml(inv.number)}${c ? ' to ' + escapeHtml(c.name) : ''}. This opens WhatsApp or your email app with the message already filled in, ready to send.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn" style="justify-content:flex-start;padding:14px 16px;" data-action="share-whatsapp" data-id="${inv.id}" ${c && c.phone ? '' : 'disabled title="No phone number on file for this customer"'}>
+        <svg class="icon" data-feather="message-circle" style="color:#25D366;"></svg>&nbsp; Share via WhatsApp
+      </button>
+      <button class="btn" style="justify-content:flex-start;padding:14px 16px;" data-action="share-email" data-id="${inv.id}" ${c && c.email ? '' : 'disabled title="No email on file for this customer"'}>
+        <svg class="icon" data-feather="mail" style="color:#1D5FA8;"></svg>&nbsp; Share via email
+      </button>
+    </div>
+  `, {
+                    title: 'Share invoice',
+                    foot: '<button class="btn ghost" id="modal-cancel">Cancel</button>'
                 });
                 document.getElementById('modal-cancel').addEventListener('click', closeModal);
                 if (window.feather) feather.replace();
             }
-
-            function printInvoice(inv) {
-                document.getElementById('print-area').innerHTML = invoicePrintHtml(inv);
-                window.print();
+            function shareViaWhatsApp(inv) {
+                const c = customerById(inv.customerId);
+                if (!c || !c.phone) { toast('This customer has no phone number on file.', 'error'); return; }
+                const { body } = shareMessage(inv);
+                const phone = c.phone.replace(/[^\d+]/g, '').replace(/^\+/, '');
+                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(body)}`, '_blank');
+                closeModal();
+            }
+            function shareViaEmail(inv) {
+                const c = customerById(inv.customerId);
+                if (!c || !c.email) { toast('This customer has no email on file.', 'error'); return; }
+                const { subject, body } = shareMessage(inv);
+                window.location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                closeModal();
             }
 
-            Object.assign(A, { openInvoiceModal, openInvoiceView, printInvoice, invoicePrintHtml, nextInvoiceNumber });
+            Object.assign(A, { openInvoiceModal, openInvoiceView, invoicePrintHtml, nextInvoiceNumber, downloadInvoicePdf, openShareMenu, shareViaWhatsApp, shareViaEmail });
 
         })();
         (function () {
@@ -2791,7 +2897,7 @@
             "use strict";
             const A = window.YaweeApp;
             const { supabase, state, uid, escapeHtml, toast, persist, loadAll,
-                invoiceById, customerById, openModal, closeModal, openInvoiceModal, openInvoiceView, printInvoice,
+                invoiceById, customerById, openModal, closeModal, openInvoiceModal, openInvoiceView,
                 openCustomerModal, openProductModal, openPaymentModal, openReminderModal, goTo, render, money, fmtDate } = A;
 
             /* ---------------- Auth views ---------------- */
@@ -2893,30 +2999,10 @@
                 }
             }
 
-            /* ---------------- Send invoice via email / WhatsApp ---------------- */
-            async function sendInvoiceVia(channel, invoiceId) {
-                if (!supabase) { toast('Connect Supabase first to send messages.', 'error'); return; }
-                const fnName = channel === 'email' ? 'send-invoice-email' : 'send-invoice-whatsapp';
-                toast(channel === 'email' ? 'Sending email…' : 'Sending WhatsApp message…');
-                const { data, error } = await supabase.functions.invoke(fnName, { body: { invoiceId } });
-                if (error || (data && data.error)) {
-                    toast('Could not send: ' + (data?.error?.message || data?.error || error?.message || 'unknown error'), 'error');
-                    return;
-                }
-                toast(channel === 'email' ? 'Invoice emailed.' : 'Invoice sent on WhatsApp.');
-                await loadAll();
-                render();
-            }
+            /* ---------------- Invoice actions: PDF download, share menu ---------------- */
+            // Sending is entirely client-side now (WhatsApp deep link / mailto), no
+            // Edge Functions or third-party sending API needed.
 
-            function openWhatsAppFallback(invoiceId) {
-                const inv = invoiceById(invoiceId);
-                const c = customerById(inv.customerId);
-                if (!c || !c.phone) { toast('This customer has no phone number on file.', 'error'); return; }
-                const trackLink = inv.trackingToken ? (window.location.origin + window.location.pathname + '?track=' + inv.trackingToken) : window.location.href;
-                const msg = `Hello ${c.name}, your invoice ${inv.number} from ${state.settings.companyName} is ready. View it here: ${trackLink}`;
-                const phone = c.phone.replace(/[^\d+]/g, '');
-                window.open(`https://wa.me/${phone.replace('+', '')}?text=${encodeURIComponent(msg)}`, '_blank');
-            }
 
             /* ---------------- Global delegated events ---------------- */
             function wireGlobalEvents() {
@@ -2932,10 +3018,10 @@
                     if (action === 'new-invoice') return openInvoiceModal(null);
                     if (action === 'edit-invoice') return openInvoiceModal(invoiceById(id));
                     if (action === 'view-invoice') return openInvoiceView(invoiceById(id));
-                    if (action === 'print-invoice') return printInvoice(invoiceById(id));
-                    if (action === 'send-invoice-email') return sendInvoiceVia('email', id);
-                    if (action === 'send-invoice-whatsapp') return sendInvoiceVia('whatsapp', id);
-                    if (action === 'send-invoice-whatsapp-fallback') return openWhatsAppFallback(id);
+                    if (action === 'download-invoice-pdf') return A.downloadInvoicePdf(invoiceById(id));
+                    if (action === 'open-share-menu') return A.openShareMenu(invoiceById(id));
+                    if (action === 'share-whatsapp') return A.shareViaWhatsApp(invoiceById(id));
+                    if (action === 'share-email') return A.shareViaEmail(invoiceById(id));
                     if (action === 'delete-invoice') {
                         if (confirm('Delete this invoice? This also removes any linked payments.')) {
                             state.invoices = state.invoices.filter(i => i.id !== id);
@@ -2943,11 +3029,6 @@
                             await persist('invoices'); await persist('payments');
                             toast('Invoice deleted.'); render();
                         }
-                        return;
-                    }
-                    if (action === 'send-invoice') {
-                        const inv = invoiceById(id);
-                        if (inv) { inv.status = 'Sent'; await persist('invoices'); toast('Invoice marked as sent.'); closeModal(); render(); }
                         return;
                     }
                     if (action === 'record-payment-for') { closeModal(); return openPaymentModal(id); }
@@ -3059,12 +3140,16 @@
 
                 const items = data.items || [];
                 const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
-                const tax = subtotal * (Number(data.tax_rate) || 0) / 100;
-                const total = subtotal + tax;
+                const deliveryFee = Number(data.delivery_fee) || 0;
+                const tax = (subtotal + deliveryFee) * (Number(data.tax_rate) || 0) / 100;
+                const total = subtotal + deliveryFee + tax;
                 const balance = Math.max(0, total - (Number(data.paid) || 0));
                 const c = data.company || {};
 
                 root.firstElementChild.innerHTML = `
+    <div style="display:flex;justify-content:center;margin-bottom:18px;">
+      <img src="data:image/png;base64,${window.YAWEE_LOGO_B64}" style="width:56px;height:56px;object-fit:contain;">
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #123B24;padding-bottom:18px;margin-bottom:22px;">
       <div>
         <div style="font-weight:700;font-size:17px;">${escapeHtml(c.name || '')}</div>
@@ -3100,11 +3185,13 @@
     </table>
     <div style="margin-left:auto;width:240px;">
       <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(subtotal)}</span></div>
+      ${deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(deliveryFee)}</span></div>` : ''}
       <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax</span><span style="font-family:monospace;">${money(tax)}</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #123B24;margin-top:4px;font-weight:700;font-size:15px;"><span>Total</span><span style="font-family:monospace;">${money(total)}</span></div>
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;color:#C0392B;"><span>Balance due</span><span style="font-family:monospace;">${money(balance)}</span></div>` : `<div style="padding:6px 0;font-size:13px;font-weight:700;color:#1F8C4C;">Paid in full</div>`}
     </div>
     ${data.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b>Notes: </b>${escapeHtml(data.notes)}</div>` : ''}
+    <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(c.name || '')}.</div>
   `;
             }
 
