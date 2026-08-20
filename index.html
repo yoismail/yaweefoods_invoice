@@ -387,6 +387,7 @@
             display: block;
             font-family: 'Space Grotesk';
             font-size: 22px;
+            transition: opacity .35s ease;
         }
 
         .login-brand-stats div span {
@@ -1379,9 +1380,9 @@
                 <p>Invoices, customers, products, payments and reminders for Yawee Foods, kept in sync so nothing falls
                     through the cracks.</p>
                 <div class="login-brand-stats">
-                    <div><b id="stat-customers">0</b><span>Customers</span></div>
-                    <div><b id="stat-invoices">0</b><span>Invoices raised</span></div>
-                    <div><b id="stat-products">0</b><span>Products listed</span></div>
+                    <div><b id="stat-customers">–</b><span>Customers</span></div>
+                    <div><b id="stat-invoices">–</b><span>Invoices raised</span></div>
+                    <div><b id="stat-products">–</b><span>Products listed</span></div>
                 </div>
             </div>
             <div class="login-brand-foot">© <span id="login-year"></span> Yawee Foods Limited</div>
@@ -3373,8 +3374,15 @@
                     const email = document.getElementById('fp-email').value.trim();
                     document.getElementById('login-error').classList.remove('show');
                     const cleanUrl = window.location.origin + window.location.pathname;
-                    await supabase.auth.resetPasswordForEmail(email, { redirectTo: cleanUrl });
-                    loginToast('If an account exists for that email, reset instructions have been sent.');
+                    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: cleanUrl });
+                    if (error) {
+                        console.error('resetPasswordForEmail failed:', error);
+                        loginError(/rate limit/i.test(error.message)
+                            ? "Too many reset emails requested recently — Supabase's built-in mailer limits this to a few per hour. Wait a bit and try again, or set up custom SMTP (see below) to lift that limit."
+                            : error.message);
+                        return;
+                    }
+                    loginToast('If an account exists for that email, reset instructions have been sent. Check spam if it doesn\'t arrive within a minute or two.');
                 });
 
                 document.getElementById('form-reset').addEventListener('submit', async (e) => {
@@ -3449,9 +3457,24 @@
             async function loadPublicStats() {
                 if (!supabase) return;
                 try {
-                    const { data } = await supabase.rpc('get_public_stats');
+                    const { data, error } = await supabase.rpc('get_public_stats');
+                    if (error) {
+                        // Most likely cause: the get_public_stats() migration hasn't been run
+                        // in this Supabase project yet — the login page just quietly keeps
+                        // its placeholder dashes rather than breaking anything.
+                        console.error('get_public_stats failed (has the SQL migration been run?):', error);
+                        return;
+                    }
                     if (data) {
-                        const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                        const setText = (id, val) => {
+                            const el = document.getElementById(id);
+                            if (!el) return;
+                            el.style.opacity = '0';
+                            requestAnimationFrame(() => {
+                                el.textContent = val ?? 0;
+                                el.style.opacity = '1';
+                            });
+                        };
                         setText('stat-customers', data.customers ?? 0);
                         setText('stat-invoices', data.invoices ?? 0);
                         setText('stat-products', data.products ?? 0);
