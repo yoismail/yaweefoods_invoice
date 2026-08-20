@@ -3399,6 +3399,23 @@
                 window.history.replaceState({}, '', url.origin + url.pathname);
             }
 
+            // Supabase redirects here with #error=...&error_code=...&error_description=...
+            // when a link (typically a password reset) is invalid or expired, rather than
+            // landing on the reset form at all. Left unhandled, the app just fell through
+            // to a plain, unexplained login screen — this surfaces what actually happened.
+            function authUrlErrorMessage() {
+                const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+                const search = new URLSearchParams(window.location.search || '');
+                const code = hash.get('error_code') || search.get('error_code');
+                const desc = hash.get('error_description') || search.get('error_description');
+                const err = hash.get('error') || search.get('error');
+                if (!code && !desc && !err) return null;
+                if (code === 'otp_expired') {
+                    return 'That link has expired or was already used — this happens if it sat unused too long, or if you clicked an older email after requesting a new one. Enter your email below to get a fresh reset link.';
+                }
+                return desc ? desc.replace(/\+/g, ' ') : (err || 'That link is no longer valid.');
+            }
+
             async function loadPublicStats() {
                 if (!supabase) return;
                 try {
@@ -3649,6 +3666,12 @@
                     render();
                 } else {
                     document.getElementById('login-screen').classList.remove('hidden');
+                    const authError = authUrlErrorMessage();
+                    if (authError) {
+                        showView('forgot');
+                        loginError(authError);
+                        cleanRecoveryParamsFromUrl();
+                    }
                     loadPublicStats();
                     wireMobileNav();
                 }
