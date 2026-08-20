@@ -1518,6 +1518,27 @@
                 })
                 : null;
 
+            window.YaweeApp = window.YaweeApp || {};
+            window.YaweeApp.pendingPasswordRecovery = false;
+
+            // This has to be registered right now, at the top of the very first script
+            // that runs, not later inside init() on DOMContentLoaded. supabase-js starts
+            // processing a recovery link's URL the instant the client above is created,
+            // and can fire this event before the rest of the app has even finished
+            // loading — if our listener isn't attached yet, the event is simply missed
+            // and the person lands straight in the dashboard instead of the reset form.
+            // The DOM elements it touches already exist at this point even though
+            // DOMContentLoaded hasn't fired yet, since this script runs at the very end
+            // of <body>, after all of that markup has already been parsed.
+            if (supabase) {
+                supabase.auth.onAuthStateChange((event) => {
+                    if (event === 'PASSWORD_RECOVERY') {
+                        window.YaweeApp.pendingPasswordRecovery = true;
+                        if (window.YaweeApp.showPasswordResetNow) window.YaweeApp.showPasswordResetNow();
+                    }
+                });
+            }
+
             /* ---------------- ID / formatting helpers ---------------- */
             function uid() { return crypto.randomUUID(); }
             function money(n) {
@@ -3277,6 +3298,15 @@
                 document.getElementById('login-error').classList.remove('show');
                 document.getElementById('login-toast').classList.remove('show');
             }
+
+            // Called from the very-early listener in app_part1.js if the PASSWORD_RECOVERY
+            // event fires after init() has already run and possibly shown the dashboard.
+            A.showPasswordResetNow = function () {
+                document.getElementById('app-loading').classList.add('hidden');
+                document.getElementById('app-shell').classList.add('hidden');
+                document.getElementById('login-screen').classList.remove('hidden');
+                showView('reset');
+            };
             function loginError(msg) {
                 const el = document.getElementById('login-error');
                 el.textContent = msg;
@@ -3652,10 +3682,12 @@
 
                 await loadAll();
                 document.getElementById('app-loading').classList.add('hidden');
-                if (isPasswordRecoveryUrl()) {
+                if (isPasswordRecoveryUrl() || A.pendingPasswordRecovery) {
                     // supabase-js has already exchanged the link for a session by this point,
-                    // but the person came here to set a new password, not to land in the
-                    // dashboard — show the reset form regardless of session state.
+                    // and may have already stripped the recovery params from the address bar
+                    // too (which is why the flag above matters as well as the URL text) —
+                    // either way, the person came here to set a new password, not to land
+                    // in the dashboard, so show the reset form regardless of session state.
                     document.getElementById('app-shell').classList.add('hidden');
                     document.getElementById('login-screen').classList.remove('hidden');
                     showView('reset');
