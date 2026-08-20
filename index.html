@@ -1642,47 +1642,77 @@
                 if (!supabase || !state.session) return;
                 let q = supabase.from(table).delete().eq('owner_id', state.session.id);
                 if (currentIds.length) {
-                    q = q.not('id', 'in', `(${currentIds.map(id => `"${id}"`).join(',')})`);
+                    q = q.not('id', 'in', `(${currentIds.join(',')})`);
                 }
-                await q;
+                const { error } = await q;
+                if (error) console.error('pruneRemoved(' + table + ') failed:', error);
+                return !error;
             }
 
+            // Every write is checked. If anything fails, persist() returns false instead
+            // of pretending it worked — callers use that to warn the person rather than
+            // closing a form and silently discarding their change.
             async function persist(what) {
-                if (!supabase || !state.session) return;
+                if (!supabase || !state.session) return true; // nothing to save to yet; not a failure
+                const failures = [];
+                const check = (label, error) => { if (error) { console.error(label + ' failed:', error); failures.push(label); } };
 
                 if (what === 'all' || what === 'customers') {
-                    if (state.customers.length) await supabase.from('customers').upsert(state.customers.map(M.customerToDb));
-                    await pruneRemoved('customers', state.customers.map(c => c.id));
+                    if (state.customers.length) {
+                        const { error } = await supabase.from('customers').upsert(state.customers.map(M.customerToDb));
+                        check('save customers', error);
+                    }
+                    if (!await pruneRemoved('customers', state.customers.map(c => c.id))) failures.push('remove old customers');
                 }
                 if (what === 'all' || what === 'products') {
-                    if (state.products.length) await supabase.from('products').upsert(state.products.map(M.productToDb));
-                    await pruneRemoved('products', state.products.map(p => p.id));
+                    if (state.products.length) {
+                        const { error } = await supabase.from('products').upsert(state.products.map(M.productToDb));
+                        check('save products', error);
+                    }
+                    if (!await pruneRemoved('products', state.products.map(p => p.id))) failures.push('remove old products');
                 }
                 if (what === 'all' || what === 'invoices') {
-                    if (state.invoices.length) await supabase.from('invoices').upsert(state.invoices.map(M.invoiceToDb));
-                    await pruneRemoved('invoices', state.invoices.map(i => i.id));
-                    // sync line items per invoice (delete then insert keeps this simple and correct)
+                    if (state.invoices.length) {
+                        const { error } = await supabase.from('invoices').upsert(state.invoices.map(M.invoiceToDb));
+                        check('save invoices', error);
+                    }
+                    if (!await pruneRemoved('invoices', state.invoices.map(i => i.id))) failures.push('remove old invoices');
+                    // Replace each invoice's line items in one atomic database call (see
+                    // sync_invoice_items in schema.sql) so a failed write can never leave
+                    // an invoice's items deleted without their replacements landing.
                     for (const inv of state.invoices) {
-                        await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
-                        if (inv.items.length) {
-                            await supabase.from('invoice_items').insert(inv.items.map(it => ({
-                                invoice_id: inv.id, product_id: it.productId || null, name: it.name, qty: it.qty, price: it.price, unit: it.unit || ''
-                            })));
-                        }
+                        const itemsPayload = inv.items.map(it => ({
+                            product_id: it.productId || '', name: it.name, qty: it.qty, price: it.price, unit: it.unit || ''
+                        }));
+                        const { error } = await supabase.rpc('sync_invoice_items', { p_invoice_id: inv.id, p_items: itemsPayload });
+                        check('save items for invoice ' + inv.number, error);
                     }
                 }
                 if (what === 'all' || what === 'payments') {
-                    if (state.payments.length) await supabase.from('payments').upsert(state.payments.map(M.paymentToDb));
-                    await pruneRemoved('payments', state.payments.map(p => p.id));
+                    if (state.payments.length) {
+                        const { error } = await supabase.from('payments').upsert(state.payments.map(M.paymentToDb));
+                        check('save payments', error);
+                    }
+                    if (!await pruneRemoved('payments', state.payments.map(p => p.id))) failures.push('remove old payments');
                 }
                 if (what === 'all' || what === 'reminders') {
-                    if (state.reminders.length) await supabase.from('reminders').upsert(state.reminders.map(M.reminderToDb));
-                    await pruneRemoved('reminders', state.reminders.map(r => r.id));
+                    if (state.reminders.length) {
+                        const { error } = await supabase.from('reminders').upsert(state.reminders.map(M.reminderToDb));
+                        check('save reminders', error);
+                    }
+                    if (!await pruneRemoved('reminders', state.reminders.map(r => r.id))) failures.push('remove old reminders');
                 }
                 if (what === 'all' || what === 'settings') {
-                    await supabase.from('settings').upsert(M.settingsToDb(state.settings));
+                    const { error } = await supabase.from('settings').upsert(M.settingsToDb(state.settings));
+                    check('save settings', error);
                 }
                 // 'session' is handled entirely by supabase.auth itself, nothing to persist manually
+
+                if (failures.length) {
+                    toast('Could not save: ' + failures[0] + '. Your change may not have been kept — please check and try again.', 'error');
+                    return false;
+                }
+                return true;
             }
 
             /* ---------------- Toast ---------------- */
@@ -2037,10 +2067,10 @@
 
             /* ---------------- Invoice form (create/edit) ---------------- */
             function lineItemRow(item, idx) {
-                const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} — ${p.stock} ${escapeHtml(p.unit || 'unit')} in stock</option>`).join('');
+                const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} — ${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))} in stock</option>`).join('');
                 const amt = (Number(item.qty) || 0) * (Number(item.price) || 0);
                 const linkedProduct = item.productId ? productById(item.productId) : null;
-                const stockHint = linkedProduct ? `<div class="cell-muted" style="font-size:11px;margin-top:3px;">${linkedProduct.stock} ${escapeHtml(linkedProduct.unit || 'unit')} in stock</div>` : '';
+                const stockHint = linkedProduct ? `<div class="cell-muted stock-hint" style="font-size:11px;margin-top:3px;">${stockHintText(linkedProduct, item.qty)}</div>` : '';
                 return `<tr data-row="${idx}">
     <td>
       <select class="item-product" data-idx="${idx}">
@@ -2051,10 +2081,18 @@
     </td>
     <td><input class="item-name" data-idx="${idx}" type="text" value="${escapeHtml(item.name)}" placeholder="Item description"></td>
     <td><input class="item-qty qty-in" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></td>
+    <td><input class="item-unit" data-idx="${idx}" type="text" value="${escapeHtml(item.unit || '')}" placeholder="unit" style="width:76px;" ${linkedProduct ? 'readonly' : ''}></td>
     <td><input class="item-price price-in" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></td>
     <td class="amt">${money(amt)}</td>
     <td class="rm-row"><button type="button" class="btn sm ghost item-remove" data-idx="${idx}"><svg class="icon" data-feather="x"></svg></button></td>
   </tr>`;
+            }
+            function stockHintText(product, enteredQty) {
+                const qty = Number(enteredQty) || 0;
+                const currentLine = `${product.stock} ${escapeHtml(A.pluralizeUnit(product.unit || 'unit', product.stock))} in stock`;
+                if (qty <= 0) return currentLine;
+                const remaining = Math.max(0, product.stock - qty);
+                return `${currentLine} · ${remaining} ${escapeHtml(A.pluralizeUnit(product.unit || 'unit', remaining))} left after this invoice`;
             }
 
             function invoiceFormHtml(draft) {
@@ -2076,7 +2114,7 @@
 
   <label style="display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:6px 0 8px;">Line items</label>
   <table class="items-table" id="items-table">
-    <thead><tr><th style="width:22%;">Product</th><th>Description</th><th>Qty</th><th>Unit price</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
+    <thead><tr><th style="width:20%;">Product</th><th>Description</th><th>Qty</th><th>Unit</th><th>Unit price</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
     <tbody id="items-body">
       ${draft.items.map((it, idx) => lineItemRow(it, idx)).join('')}
     </tbody>
@@ -2137,8 +2175,11 @@
                     document.querySelectorAll('.item-name').forEach(inp => {
                         inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].name = inp.value; });
                     });
+                    document.querySelectorAll('.item-unit').forEach(inp => {
+                        inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].unit = inp.value; refreshStockHint(Number(inp.dataset.idx)); });
+                    });
                     document.querySelectorAll('.item-qty').forEach(inp => {
-                        inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].qty = Number(inp.value) || 0; refreshRowAmount(Number(inp.dataset.idx)); recalcTotals(draft); });
+                        inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].qty = Number(inp.value) || 0; refreshRowAmount(Number(inp.dataset.idx)); refreshStockHint(Number(inp.dataset.idx)); recalcTotals(draft); });
                     });
                     document.querySelectorAll('.item-price').forEach(inp => {
                         inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].price = Number(inp.value) || 0; refreshRowAmount(Number(inp.dataset.idx)); recalcTotals(draft); });
@@ -2151,6 +2192,14 @@
                             recalcTotals(draft);
                         });
                     });
+                }
+                function refreshStockHint(idx) {
+                    const row = document.querySelector('tr[data-row="' + idx + '"]');
+                    if (!row) return;
+                    const it = draft.items[idx];
+                    const linkedProduct = it.productId ? productById(it.productId) : null;
+                    const hintEl = row.querySelector('.stock-hint');
+                    if (hintEl && linkedProduct) hintEl.innerHTML = stockHintText(linkedProduct, it.qty);
                 }
                 function refreshRowAmount(idx) {
                     const row = document.querySelector('tr[data-row="' + idx + '"]');
@@ -2201,18 +2250,41 @@
 
                 wireInvoiceForm(draft, async (finalDraft) => {
                     const oldItems = existing ? existing.items : [];
+
+                    // A custom line item (typed in rather than picked from the catalogue)
+                    // becomes a real product automatically, so it's there to edit — add a
+                    // SKU, category, correct the stock — on the Products page afterwards.
+                    let newProductsCreated = false;
+                    for (const item of finalDraft.items) {
+                        if (!item.productId && item.name.trim()) {
+                            const newProduct = {
+                                id: uid(), name: item.name.trim(), sku: '', category: '',
+                                price: Number(item.price) || 0, unit: item.unit || 'unit', stock: 0, description: ''
+                            };
+                            state.products.push(newProduct);
+                            item.productId = newProduct.id;
+                            item.unit = newProduct.unit;
+                            newProductsCreated = true;
+                        }
+                    }
+                    if (newProductsCreated) await persist('products');
+
                     if (existing) {
                         const idx = state.invoices.findIndex(i => i.id === existing.id);
                         state.invoices[idx] = finalDraft;
-                        toast('Invoice ' + finalDraft.number + ' updated.');
                     } else {
                         state.invoices.push(finalDraft);
                         state.settings.nextInvoiceSeq = (state.settings.nextInvoiceSeq || (state.invoices.length)) + 1;
                         await persist('settings');
-                        toast('Invoice ' + finalDraft.number + ' created.');
                     }
-                    await persist('invoices');
+                    const saved = await persist('invoices');
+                    if (!saved) {
+                        // persist() already toasted the specific error — leave the form open
+                        // so nothing typed gets lost, rather than closing on a failed save.
+                        return;
+                    }
                     await A.adjustStockForInvoiceChange(oldItems, finalDraft.items);
+                    toast(existing ? 'Invoice ' + finalDraft.number + ' updated.' : 'Invoice ' + finalDraft.number + ' created.');
                     closeModal();
                     A.render();
                 });
@@ -2565,12 +2637,11 @@
                     if (existing) {
                         const idx = state.customers.findIndex(x => x.id === existing.id);
                         state.customers[idx] = draft;
-                        toast('Customer updated.');
                     } else {
                         state.customers.push(draft);
-                        toast('Customer added.');
                     }
-                    await persist('customers');
+                    if (!await persist('customers')) return;
+                    toast(existing ? 'Customer updated.' : 'Customer added.');
                     closeModal();
                     A.render();
                 });
@@ -2659,12 +2730,11 @@
                     if (existing) {
                         const idx = state.products.findIndex(x => x.id === existing.id);
                         state.products[idx] = draft;
-                        toast('Product updated.');
                     } else {
                         state.products.push(draft);
-                        toast('Product added.');
                     }
-                    await persist('products');
+                    if (!await persist('products')) return;
+                    toast(existing ? 'Product updated.' : 'Product added.');
                     closeModal();
                     A.render();
                 });
@@ -2863,12 +2933,11 @@
                     if (isEdit) {
                         const idx = state.payments.findIndex(p => p.id === draft.id);
                         if (idx > -1) state.payments[idx] = draft;
-                        toast('Payment updated.');
                     } else {
                         state.payments.push(draft);
-                        toast('Payment recorded.');
                     }
-                    await persist('payments');
+                    if (!await persist('payments')) return;
+                    toast(isEdit ? 'Payment updated.' : 'Payment recorded.');
                     closeModal();
                     A.render();
                 });
@@ -2949,7 +3018,7 @@
                     if (!draft.customerId) { toast('Choose a customer.', 'error'); return; }
                     if (!draft.message) { toast('Add a reminder message.', 'error'); return; }
                     state.reminders.push(draft);
-                    await persist('reminders');
+                    if (!await persist('reminders')) return;
                     toast('Reminder saved.');
                     closeModal();
                     A.render();
