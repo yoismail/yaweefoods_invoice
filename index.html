@@ -494,7 +494,7 @@ window.YAWEE_LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAXYAAAEtCAYAAAAcF0tRAAAAAXNSR0I
 // Settings > Preferences after deploying to confirm the live site is
 // actually running this version and not a cached older copy.
 // ---------------------------------------------------------
-const APP_BUILD = "2026-08-21.5";
+const APP_BUILD = "2026-08-21.6";
 console.log('Yawee Foods Business Manager — build ' + APP_BUILD);
 
 const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -985,10 +985,34 @@ function renderTopbarActions(){
   if(window.feather) feather.replace();
 }
 
+// Compares two objects field-by-field and returns a plain-English list of
+// what changed — used to make activity log entries say "Price changed from
+// £21.99 to £24.99" instead of just "Edited product".
+function diffSummary(oldObj, newObj, fieldDefs){
+  const changes = [];
+  fieldDefs.forEach(({key, label, format}) => {
+    const oldVal = oldObj ? oldObj[key] : undefined;
+    const newVal = newObj[key];
+    const fmt = format || (v => (v===undefined||v===null||v==='') ? '(none)' : String(v));
+    const oldStr = fmt(oldVal);
+    const newStr = fmt(newVal);
+    if(oldStr !== newStr) changes.push(`${label} changed from "${oldStr}" to "${newStr}"`);
+  });
+  return changes;
+}
+// Joins a list of individual changes into one readable line, capped so the
+// activity feed never shows an unreadable wall of text for a big edit.
+function summarizeChanges(changes){
+  if(!changes.length) return 'No changes detected';
+  const shown = changes.slice(0, 4);
+  const extra = changes.length - shown.length;
+  return shown.join('; ') + (extra > 0 ? `; +${extra} more change${extra===1?'':'s'}` : '');
+}
+
 Object.assign(A, {
   invoiceTotals, invoiceStatus, statusBadgeClass, customerById, productById, invoiceById,
   customerStats, badge, NAV, PAGE_META, renderSidebar, goTo, render, renderTopbarActions,
-  adjustStockForInvoiceChange, pluralizeUnit,
+  adjustStockForInvoiceChange, pluralizeUnit, diffSummary, summarizeChanges,
   pages: {}, afterRender: {}
 });
 
@@ -1119,6 +1143,41 @@ const { state, money, fmtDate, todayISO, addDays, escapeHtml, uid, invoiceTotals
 
 const INVOICE_STATUSES = ['Draft','Sent','Paid','Cancelled'];
 const ACTIVITY_VERB = { created:'created this', updated:'edited this', deleted:'deleted this', status_changed:'changed the status' };
+
+// Line items don't have a stable id of their own, so they're matched
+// between the before/after versions by product (or by name for a custom
+// item) — good enough to catch quantity/price changes and additions/removals.
+function diffInvoiceItems(oldItems, newItems){
+  const key = it => it.productId || it.name;
+  const oldMap = new Map((oldItems||[]).map(it => [key(it), it]));
+  const newMap = new Map((newItems||[]).map(it => [key(it), it]));
+  const changes = [];
+  newMap.forEach((newIt, k) => {
+    const oldIt = oldMap.get(k);
+    if(!oldIt){
+      changes.push(`Added ${newIt.qty} × ${newIt.name}`);
+    } else if(Number(oldIt.qty) !== Number(newIt.qty)){
+      changes.push(`${newIt.name} quantity changed from ${oldIt.qty} to ${newIt.qty}`);
+    } else if(Number(oldIt.price) !== Number(newIt.price)){
+      changes.push(`${newIt.name} price changed from ${money(oldIt.price)} to ${money(newIt.price)}`);
+    }
+  });
+  oldMap.forEach((oldIt, k) => {
+    if(!newMap.has(k)) changes.push(`Removed ${oldIt.name}`);
+  });
+  return changes;
+}
+function summarizeInvoiceChanges(oldInv, newInv){
+  const fieldChanges = A.diffSummary(oldInv, newInv, [
+    { key:'customerId', label:'Customer', format: v => customerById(v)?.name || '(none)' },
+    { key:'issueDate', label:'Issue date', format: v => fmtDate(v) },
+    { key:'dueDate', label:'Due date', format: v => fmtDate(v) },
+    { key:'deliveryFee', label:'Delivery fee', format: v => money(v||0) },
+    { key:'taxRate', label:'Tax rate', format: v => (v||0)+'%' },
+    { key:'notes', label:'Notes', format: v => v || '(none)' },
+  ]);
+  return A.summarizeChanges([...fieldChanges, ...diffInvoiceItems(oldInv.items, newInv.items)]);
+}
 
 /* ---------------- Invoices: list page ---------------- */
 A.pages.invoices = function(){
@@ -1410,7 +1469,7 @@ function openInvoiceModal(existing){
     const custName = customerById(finalDraft.customerId)?.name || 'unknown customer';
     await A.logActivity('invoice', finalDraft.id, finalDraft.number,
       existing ? 'updated' : 'created',
-      existing ? `Edited invoice for ${custName}` : `Created invoice for ${custName}, total ${money(invoiceTotals(finalDraft).total)}`
+      existing ? summarizeInvoiceChanges(existing, finalDraft) : `Created invoice for ${custName}, total ${money(invoiceTotals(finalDraft).total)}`
     );
     toast(existing ? 'Invoice '+finalDraft.number+' updated.' : 'Invoice '+finalDraft.number+' created.');
     closeModal();
@@ -1846,7 +1905,11 @@ function openCustomerModal(existing){
       state.customers.push(draft);
     }
     if(!await persist('customers')) return;
-    await A.logActivity('customer', draft.id, draft.name, existing ? 'updated' : 'created', existing ? 'Edited customer details' : 'Added new customer');
+    await A.logActivity('customer', draft.id, draft.name, existing ? 'updated' : 'created',
+      existing ? A.summarizeChanges(A.diffSummary(existing, draft, [
+        { key:'name', label:'Name' }, { key:'email', label:'Email' }, { key:'phone', label:'Phone' },
+        { key:'address', label:'Address' }, { key:'notes', label:'Notes' },
+      ])) : 'Added new customer');
     toast(existing ? 'Customer updated.' : 'Customer added.');
     closeModal();
     A.render();
@@ -1985,7 +2048,12 @@ function openProductModal(existing){
     if(!existing && openingStock > 0){
       await A.logStockMovements([{ productId: draft.id, delta: openingStock, reason: 'initial', reference: 'Opening stock', balanceAfter: openingStock }]);
     }
-    await A.logActivity('product', draft.id, draft.name, existing ? 'updated' : 'created', existing ? 'Edited product details' : 'Added new product');
+    await A.logActivity('product', draft.id, draft.name, existing ? 'updated' : 'created',
+      existing ? A.summarizeChanges(A.diffSummary(existing, draft, [
+        { key:'name', label:'Name' }, { key:'sku', label:'SKU' }, { key:'category', label:'Category' },
+        { key:'price', label:'Price', format: v => money(v||0) }, { key:'unit', label:'Unit' },
+        { key:'reorderPoint', label:'Reorder point' }, { key:'description', label:'Description' },
+      ])) : 'Added new product');
     toast(existing ? 'Product updated.' : 'Product added.');
     closeModal();
     A.render();
@@ -2291,7 +2359,12 @@ function openPaymentModal(invoiceId, existingPayment){
     if(!await persist('payments')) return;
     const inv = invoiceById(draft.invoiceId);
     await A.logActivity('payment', draft.id, inv ? inv.number : '', isEdit ? 'updated' : 'created',
-      `${isEdit ? 'Edited' : 'Recorded'} payment of ${money(draft.amount)} via ${draft.method}`);
+      isEdit
+        ? A.summarizeChanges(A.diffSummary(existingPayment, draft, [
+            { key:'amount', label:'Amount', format: v => money(v||0) }, { key:'date', label:'Date', format: v => fmtDate(v) },
+            { key:'method', label:'Method' }, { key:'note', label:'Note' },
+          ]))
+        : `Recorded payment of ${money(draft.amount)} via ${draft.method}`);
     toast(isEdit ? 'Payment updated.' : 'Payment recorded.');
     closeModal();
     A.render();
