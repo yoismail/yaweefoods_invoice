@@ -2519,42 +2519,55 @@
             async function buildInvoicePdfBlob(inv) {
                 await ensureHtml2Pdf();
                 if (!window.html2pdf) throw new Error('PDF library not loaded');
-                const holder = document.createElement('div');
-                // Mobile Safari (and some other mobile browsers) can render an
-                // opacity:0 / off-canvas element incompletely when html2canvas captures
-                // it — that's what was clipping and garbling the downloaded PDF on
-                // phones while it looked fine on desktop. The reliable fix is to make
-                // it briefly fully visible on top of everything instead of hiding it,
-                // which every browser paints correctly. It's on screen for well under
-                // a second while the PDF is being generated.
-                holder.style.position = 'fixed';
-                holder.style.inset = '0';
-                holder.style.zIndex = '99999';
-                holder.style.background = '#fff';
-                holder.style.overflow = 'auto';
-                holder.style.pointerEvents = 'none';
-                holder.innerHTML = invoicePrintHtml(inv);
-                const doc = holder.firstElementChild;
-                doc.style.width = '210mm';
-                doc.style.maxWidth = 'none';
-                doc.style.padding = '16mm';
-                doc.style.margin = '0';
-                document.body.appendChild(holder);
-                // Give the browser a paint frame before capturing, so images (the logo)
-                // are guaranteed to have actually rendered on slower mobile devices.
+
+                // Render into a blank iframe rather than overlaying the invoice on top of
+                // our live app. Two rounds of this bug happened because the capture tool
+                // was reflowing our *entire* app (sidebar, responsive breakpoints and
+                // all) to compute where the invoice sat, and getting it wrong depending
+                // on device/viewport. An iframe has nothing else in it — no surrounding
+                // layout to get confused by — so there's nothing left to go wrong here
+                // regardless of screen size or device.
+                const PAGE_WIDTH_PX = 794; // 210mm at 96dpi
+
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'fixed';
+                iframe.style.top = '0';
+                iframe.style.left = '0';
+                iframe.style.width = PAGE_WIDTH_PX + 'px';
+                iframe.style.height = '1123px';
+                iframe.style.border = '0';
+                iframe.style.zIndex = '99999';
+                iframe.style.background = '#fff';
+                document.body.appendChild(iframe);
+
+                const idoc = iframe.contentDocument;
+                idoc.open();
+                idoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box;}</style></head><body></body></html>');
+                idoc.close();
+                idoc.body.innerHTML = invoicePrintHtml(inv);
+                const docEl = idoc.body.firstElementChild;
+                docEl.style.width = PAGE_WIDTH_PX + 'px';
+                docEl.style.maxWidth = 'none';
+                docEl.style.padding = '60px'; // ≈16mm at 96dpi
+                docEl.style.margin = '0';
+
+                // Resize the iframe to fit the actual content height, so a longer
+                // invoice (many line items) never gets clipped at a fixed page height.
                 await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                iframe.style.height = Math.max(1123, docEl.scrollHeight) + 'px';
+                await new Promise(r => requestAnimationFrame(r));
 
                 try {
-                    const blob = await window.html2pdf().from(doc).set({
+                    const blob = await window.html2pdf().from(docEl).set({
                         margin: 0,
                         image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: Math.max(794, doc.scrollWidth), windowHeight: Math.max(1123, doc.scrollHeight) },
+                        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
                         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
                         pagebreak: { mode: 'avoid-all' }
                     }).toPdf().output('blob');
                     return blob;
                 } finally {
-                    document.body.removeChild(holder);
+                    document.body.removeChild(iframe);
                 }
             }
 
