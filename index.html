@@ -1560,6 +1560,14 @@
         // ---------------------------------------------------------
         // 1) PASTE YOUR SUPABASE PROJECT DETAILS HERE
         // ---------------------------------------------------------
+        // ---------------------------------------------------------
+        // BUILD VERSION — bumped on every update. Check the browser console or
+        // Settings > Preferences after deploying to confirm the live site is
+        // actually running this version and not a cached older copy.
+        // ---------------------------------------------------------
+        const APP_BUILD = "2026-08-21.1";
+        console.log('Yawee Foods Business Manager — build ' + APP_BUILD);
+
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
         const SUPABASE_ANON_KEY = "sb_publishable_QFw3lC2C9bHA7hGX0f__og_23NlIWC5";  // Settings > API Keys > Publishable key
 
@@ -1810,7 +1818,7 @@
             window.YaweeApp = window.YaweeApp || {};
             Object.assign(window.YaweeApp, {
                 supabase, state, uid, money, fmtDate, todayISO, addDays, escapeHtml, initials,
-                loadAll, persist, toast, DEFAULT_SETTINGS
+                loadAll, persist, toast, DEFAULT_SETTINGS, APP_BUILD
             });
 
         })();
@@ -3487,7 +3495,11 @@
       <p class="desc">General app behaviour.</p>
       <div class="field">
         <label>Data storage</label>
-        <div class="hint" style="margin-top:0;">All data (invoices, customers, products, payments) is saved automatically to your browser's Claude storage as you work. Nothing is sent to a real payment processor or email server in this prototype.</div>
+        <div class="hint" style="margin-top:0;">All data (invoices, customers, products, payments) is saved to your own Supabase database as you work, and stays available across devices and browsers once you're logged in.</div>
+      </div>
+      <div class="field">
+        <label>Version</label>
+        <div class="hint" style="margin-top:0;">Build ${escapeHtml(A.APP_BUILD || 'unknown')}. If something you were told is fixed still isn't working, check this matches the latest file, this app has no auto-update, a fresh deploy is needed after every change.</div>
       </div>
       <div class="field">
         <label>Danger zone</label>
