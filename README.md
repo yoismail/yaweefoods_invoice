@@ -43,7 +43,7 @@ A single-file invoicing and business management app built for **Yawee Foods Limi
 - Live "X left after this invoice" preview while building an invoice, with correct pluralisation (1 box / 3 boxes)
 
 **Payments**
-- Record partial and split payments against a single invoice (e.g. £200 by cash today, £300 by bank transfer next week) — balances update automatically as each payment lands
+- Record partial and split payments against a single invoice (e.g. £200 by cash today, £300 by bank transfer next week) balances update automatically as each payment lands
 - Edit or delete a recorded payment if a mistake was made
 - Payment and invoice history grouped by customer, one click to see everything for a given account
 
