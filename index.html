@@ -494,7 +494,7 @@ window.YAWEE_LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAXYAAAEtCAYAAAAcF0tRAAAAAXNSR0I
 // Settings > Preferences after deploying to confirm the live site is
 // actually running this version and not a cached older copy.
 // ---------------------------------------------------------
-const APP_BUILD = "2026-08-21.4";
+const APP_BUILD = "2026-08-21.5";
 console.log('Yawee Foods Business Manager — build ' + APP_BUILD);
 
 const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -564,9 +564,11 @@ const state = {
   payments: [],
   reminders: [],
   stockMovements: [],
+  activityLog: [],
+  pendingInvites: [],
   settings: null,
   page: 'dashboard',
-  filters: { invoices:{status:'all', q:''}, customers:{q:''}, products:{q:''}, payments:{status:'all'}, reminders:{status:'all'}, reports:{preset:'6m', from:null, to:null} }
+  filters: { invoices:{status:'all', q:''}, customers:{q:''}, products:{q:''}, payments:{status:'all'}, reminders:{status:'all'}, reports:{preset:'6m', from:null, to:null}, activity:{entityType:'all'} }
 };
 
 const DEFAULT_SETTINGS = {
@@ -586,16 +588,16 @@ const DEFAULT_SETTINGS = {
 
 /* ---------------- Mappers: DB (snake_case) <-> JS state (camelCase) ---------------- */
 const M = {
-  customerToDb: c => ({ id:c.id, owner_id: state.session.id, name:c.name, email:c.email, phone:c.phone, address:c.address, notes:c.notes }),
+  customerToDb: c => ({ id:c.id, owner_id: state.session.id, business_id: state.session.businessId, name:c.name, email:c.email, phone:c.phone, address:c.address, notes:c.notes }),
   customerFromDb: r => ({ id:r.id, name:r.name, email:r.email||'', phone:r.phone||'', address:r.address||'', notes:r.notes||'', createdAt:(r.created_at||'').slice(0,10) }),
 
-  productToDb: p => ({ id:p.id, owner_id: state.session.id, name:p.name, sku:p.sku, category:p.category, price:p.price, unit:p.unit, stock:p.stock, reorder_point:p.reorderPoint ?? 10, description:p.description }),
+  productToDb: p => ({ id:p.id, owner_id: state.session.id, business_id: state.session.businessId, name:p.name, sku:p.sku, category:p.category, price:p.price, unit:p.unit, stock:p.stock, reorder_point:p.reorderPoint ?? 10, description:p.description }),
   productFromDb: r => ({ id:r.id, name:r.name, sku:r.sku||'', category:r.category||'', price:Number(r.price)||0, unit:r.unit||'unit', stock:Number(r.stock)||0, reorderPoint:Number(r.reorder_point ?? 10), description:r.description||'' }),
 
-  stockMovementToDb: m => ({ id:m.id, owner_id: state.session.id, product_id:m.productId, delta:m.delta, reason:m.reason, reference:m.reference||'', balance_after:m.balanceAfter }),
+  stockMovementToDb: m => ({ id:m.id, owner_id: state.session.id, business_id: state.session.businessId, product_id:m.productId, delta:m.delta, reason:m.reason, reference:m.reference||'', balance_after:m.balanceAfter }),
   stockMovementFromDb: r => ({ id:r.id, productId:r.product_id, delta:Number(r.delta)||0, reason:r.reason, reference:r.reference||'', balanceAfter:Number(r.balance_after)||0, createdAt:r.created_at }),
 
-  invoiceToDb: i => ({ id:i.id, owner_id: state.session.id, number:i.number, customer_id:i.customerId||null, issue_date:i.issueDate||null, due_date:i.dueDate||null, tax_rate:i.taxRate, delivery_fee:i.deliveryFee||0, notes:i.notes||'', status:i.status }),
+  invoiceToDb: i => ({ id:i.id, owner_id: state.session.id, business_id: state.session.businessId, number:i.number, customer_id:i.customerId||null, issue_date:i.issueDate||null, due_date:i.dueDate||null, tax_rate:i.taxRate, delivery_fee:i.deliveryFee||0, notes:i.notes||'', status:i.status }),
   invoiceFromDb: r => ({
     id:r.id, number:r.number, customerId:r.customer_id, issueDate:r.issue_date, dueDate:r.due_date,
     taxRate:Number(r.tax_rate)||0, deliveryFee:Number(r.delivery_fee)||0, notes:r.notes||'', status:r.status, createdAt:(r.created_at||'').slice(0,10),
@@ -603,14 +605,16 @@ const M = {
     items:(r.invoice_items||[]).map(it=>({ productId:it.product_id||'', name:it.name, qty:Number(it.qty)||0, price:Number(it.price)||0, unit:it.unit||'' }))
   }),
 
-  paymentToDb: p => ({ id:p.id, owner_id: state.session.id, invoice_id:p.invoiceId, amount:p.amount, date:p.date, method:p.method, note:p.note||'' }),
+  paymentToDb: p => ({ id:p.id, owner_id: state.session.id, business_id: state.session.businessId, invoice_id:p.invoiceId, amount:p.amount, date:p.date, method:p.method, note:p.note||'' }),
   paymentFromDb: r => ({ id:r.id, invoiceId:r.invoice_id, amount:Number(r.amount)||0, date:r.date, method:r.method||'', note:r.note||'' }),
 
-  reminderToDb: r => ({ id:r.id, owner_id: state.session.id, invoice_id:r.invoiceId||null, customer_id:r.customerId||null, message:r.message, due_date:r.dueDate, status:r.status }),
+  reminderToDb: r => ({ id:r.id, owner_id: state.session.id, business_id: state.session.businessId, invoice_id:r.invoiceId||null, customer_id:r.customerId||null, message:r.message, due_date:r.dueDate, status:r.status }),
   reminderFromDb: r => ({ id:r.id, invoiceId:r.invoice_id, customerId:r.customer_id, message:r.message||'', dueDate:r.due_date, status:r.status||'Pending', createdAt:(r.created_at||'').slice(0,10) }),
 
-  settingsToDb: s => ({ owner_id: state.session.id, company_name:s.companyName, website:s.website, email:s.email, phone:s.phone, address:s.address, currency:s.currency, tax_rate:s.taxRate, tax_number:s.taxNumber, invoice_prefix:s.invoicePrefix, next_invoice_seq:s.nextInvoiceSeq, manager_phone:s.managerPhone||'' }),
+  settingsToDb: s => ({ owner_id: state.session.id, business_id: state.session.businessId, company_name:s.companyName, website:s.website, email:s.email, phone:s.phone, address:s.address, currency:s.currency, tax_rate:s.taxRate, tax_number:s.taxNumber, invoice_prefix:s.invoicePrefix, next_invoice_seq:s.nextInvoiceSeq, manager_phone:s.managerPhone||'' }),
   settingsFromDb: r => ({ companyName:r.company_name, website:r.website, email:r.email, phone:r.phone, address:r.address, currency:r.currency, taxRate:Number(r.tax_rate)||0, taxNumber:r.tax_number||'', invoicePrefix:r.invoice_prefix, nextInvoiceSeq:r.next_invoice_seq, managerPhone:r.manager_phone||'', users:[] }),
+
+  activityFromDb: r => ({ id:r.id, actorId:r.actor_id, actorName:r.actor_name||'Someone', entityType:r.entity_type, entityId:r.entity_id, entityLabel:r.entity_label||'', action:r.action, detail:r.detail||'', createdAt:r.created_at }),
 };
 
 /* ---------------- Load from Supabase ---------------- */
@@ -624,16 +628,36 @@ async function loadAll(){
   if(!session){ state.session = null; return; }
 
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-  state.session = { id: session.user.id, name: (profile && profile.name) || session.user.email, email: session.user.email };
 
-  const [custR, prodR, invR, payR, remR, setR, moveR] = await Promise.all([
+  // Which shared business this account belongs to — every table's Row
+  // Level Security policy checks membership of this business_id, not
+  // this individual user, so this is what makes data shared correctly.
+  const { data: membership, error: membershipError } = await supabase.rpc('get_my_membership');
+  if(membershipError || !membership || !membership.business_id){
+    console.error('Could not resolve business membership:', membershipError);
+    toast('Could not load your business account. Try refreshing, or contact support if this continues.', 'error');
+    state.session = { id: session.user.id, name: (profile && profile.name) || session.user.email, email: session.user.email, businessId: null, role: null };
+    return;
+  }
+  state.session = {
+    id: session.user.id, name: (profile && profile.name) || session.user.email, email: session.user.email,
+    businessId: membership.business_id, role: membership.role
+  };
+
+  // RLS already restricts every one of these to rows in the caller's
+  // business — no extra .eq('business_id', ...) needed on reads, only
+  // on settings, which is looked up by business_id as its actual key.
+  const [custR, prodR, invR, payR, remR, setR, moveR, actR, teamR, inviteR] = await Promise.all([
     supabase.from('customers').select('*').order('name'),
     supabase.from('products').select('*').order('name'),
     supabase.from('invoices').select('*, invoice_items(*)').order('created_at', {ascending:false}),
     supabase.from('payments').select('*').order('date', {ascending:false}),
     supabase.from('reminders').select('*').order('due_date'),
-    supabase.from('settings').select('*').eq('owner_id', session.user.id).maybeSingle(),
+    supabase.from('settings').select('*').eq('business_id', membership.business_id).maybeSingle(),
     supabase.from('stock_movements').select('*').order('created_at', {ascending:false}).limit(500),
+    supabase.from('activity_log').select('*').order('created_at', {ascending:false}).limit(300),
+    supabase.from('memberships').select('user_id, role, profiles(name)').eq('business_id', membership.business_id),
+    supabase.from('pending_invites').select('*').eq('business_id', membership.business_id).is('used_at', null),
   ]);
 
   state.customers = (custR.data || []).map(M.customerFromDb);
@@ -642,6 +666,8 @@ async function loadAll(){
   state.payments = (payR.data || []).map(M.paymentFromDb);
   state.reminders = (remR.data || []).map(M.reminderFromDb);
   state.stockMovements = (moveR.data || []).map(M.stockMovementFromDb);
+  state.activityLog = (actR.data || []).map(M.activityFromDb);
+  state.pendingInvites = (inviteR.data || []).map(r => ({ id:r.id, email:r.email, role:r.role }));
 
   if(setR.data){
     state.settings = M.settingsFromDb(setR.data);
@@ -649,8 +675,12 @@ async function loadAll(){
     state.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
     await supabase.from('settings').insert(M.settingsToDb(state.settings));
   }
-  // users list (extra profiles sharing this business) is kept simple: just the current owner for now
-  state.settings.users = [{ id: state.session.id, name: state.session.name, email: state.session.email, role:'Owner' }];
+  state.settings.users = (teamR.data || []).map(m => ({
+    id: m.user_id, name: (m.profiles && m.profiles.name) || 'Team member', role: m.role
+  }));
+  if(!state.settings.users.length){
+    state.settings.users = [{ id: state.session.id, name: state.session.name, role: state.session.role || 'owner' }];
+  }
 }
 
 /* ---------------- Persist to Supabase ----------------
@@ -658,8 +688,8 @@ async function loadAll(){
    any rows in the database that are no longer present locally
    (covers deletes made through the UI). ---------------- */
 async function pruneRemoved(table, currentIds){
-  if(!supabase || !state.session) return;
-  let q = supabase.from(table).delete().eq('owner_id', state.session.id);
+  if(!supabase || !state.session || !state.session.businessId) return;
+  let q = supabase.from(table).delete().eq('business_id', state.session.businessId);
   if(currentIds.length){
     q = q.not('id', 'in', `(${currentIds.join(',')})`);
   }
@@ -672,7 +702,7 @@ async function pruneRemoved(table, currentIds){
 // of pretending it worked — callers use that to warn the person rather than
 // closing a form and silently discarding their change.
 async function persist(what, opts){
-  if(!supabase || !state.session) return true; // nothing to save to yet; not a failure
+  if(!supabase || !state.session || !state.session.businessId) return true; // nothing to save to yet; not a failure
   const failures = [];
   const check = (label, error) => { if(error){ console.error(label+' failed:', error); failures.push(label); } };
 
@@ -752,9 +782,30 @@ async function logStockMovements(entries){
     reference: e.reference || '', balanceAfter: e.balanceAfter, createdAt: new Date().toISOString()
   }));
   state.stockMovements.unshift(...records);
-  if(!supabase || !state.session) return;
+  if(!supabase || !state.session || !state.session.businessId) return;
   const { error } = await supabase.from('stock_movements').insert(records.map(M.stockMovementToDb));
   if(error) console.error('logStockMovements failed:', error);
+}
+
+// The "who did what" trail: called at every create/edit/delete/status
+// change across invoices, customers, products, payments, and reminders.
+// Append-only from the client (see the RLS policy in schema.sql — no
+// update or delete policy exists on activity_log), so it can't be quietly
+// edited after the fact by whoever is logged in.
+async function logActivity(entityType, entityId, entityLabel, action, detail){
+  if(!state.session) return;
+  const record = {
+    id: uid(), actorId: state.session.id, actorName: state.session.name || 'Someone',
+    entityType, entityId, entityLabel: entityLabel || '', action, detail: detail || '',
+    createdAt: new Date().toISOString()
+  };
+  state.activityLog.unshift(record);
+  if(!supabase || !state.session.businessId) return;
+  const { error } = await supabase.from('activity_log').insert({
+    id: record.id, business_id: state.session.businessId, actor_id: record.actorId, actor_name: record.actorName,
+    entity_type: entityType, entity_id: entityId, entity_label: record.entityLabel, action, detail: record.detail
+  });
+  if(error) console.error('logActivity failed:', error);
 }
 
 /* ---------------- Toast ---------------- */
@@ -771,7 +822,7 @@ function toast(msg, kind){
 window.YaweeApp = window.YaweeApp || {};
 Object.assign(window.YaweeApp, {
   supabase, state, uid, money, fmtDate, todayISO, addDays, escapeHtml, initials,
-  loadAll, persist, logStockMovements, toast, DEFAULT_SETTINGS, APP_BUILD
+  loadAll, persist, logStockMovements, logActivity, toast, DEFAULT_SETTINGS, APP_BUILD
 });
 
 })();
@@ -868,6 +919,7 @@ const NAV = [
   { id:'payments', label:'Payments', icon:'credit-card' },
   { id:'reminders', label:'Reminders', icon:'bell' },
   { id:'reports', label:'Reports', icon:'bar-chart-2' },
+  { id:'activity', label:'Activity', icon:'activity' },
   { id:'settings', label:'Settings', icon:'settings' },
 ];
 const PAGE_META = {
@@ -878,7 +930,8 @@ const PAGE_META = {
   payments:{ title:'Payments', sub:'Track what has been received' },
   reminders:{ title:'Reminders', sub:'Stay on top of due and overdue invoices' },
   reports:{ title:'Reports', sub:'Revenue, customers and outstanding balances' },
-  settings:{ title:'Settings', sub:'Company details, tax and users' },
+  activity:{ title:'Activity', sub:'Who did what, and when' },
+  settings:{ title:'Settings', sub:'Company details, tax and team' },
 };
 
 function renderSidebar(){
@@ -1065,6 +1118,7 @@ const { state, money, fmtDate, todayISO, addDays, escapeHtml, uid, invoiceTotals
         customerById, productById, invoiceById, openModal, closeModal, toast, persist } = A;
 
 const INVOICE_STATUSES = ['Draft','Sent','Paid','Cancelled'];
+const ACTIVITY_VERB = { created:'created this', updated:'edited this', deleted:'deleted this', status_changed:'changed the status' };
 
 /* ---------------- Invoices: list page ---------------- */
 A.pages.invoices = function(){
@@ -1353,6 +1407,11 @@ function openInvoiceModal(existing){
       return;
     }
     await A.adjustStockForInvoiceChange(oldItems, finalDraft.items, finalDraft.number);
+    const custName = customerById(finalDraft.customerId)?.name || 'unknown customer';
+    await A.logActivity('invoice', finalDraft.id, finalDraft.number,
+      existing ? 'updated' : 'created',
+      existing ? `Edited invoice for ${custName}` : `Created invoice for ${custName}, total ${money(invoiceTotals(finalDraft).total)}`
+    );
     toast(existing ? 'Invoice '+finalDraft.number+' updated.' : 'Invoice '+finalDraft.number+' created.');
     closeModal();
     A.render();
@@ -1460,7 +1519,19 @@ function openInvoiceView(inv){
       <span style="font-size:12px;color:var(--muted-2);">Overdue shows automatically once a Sent invoice passes its due date with a balance owing.</span>
     </div>`;
 
-  openModal(statusBar + '<div style="overflow-x:auto;">' + invoicePrintHtml(inv) + '</div>' + linkHtml, {
+  const activityForInvoice = state.activityLog.filter(a=>a.entityType==='invoice' && a.entityId===inv.id).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const activityHtml = activityForInvoice.length ? `
+    <div style="max-width:210mm;margin:14px auto 0;padding:12px 14px;background:#F5F7F2;border-radius:8px;">
+      <div style="font-size:11px;text-transform:uppercase;color:var(--muted-2);font-weight:700;margin-bottom:8px;">Activity</div>
+      ${activityForInvoice.map(a=>`
+        <div style="font-size:12.5px;color:var(--muted);padding:3px 0;">
+          <b style="color:var(--ink);">${escapeHtml(a.actorName)}</b> ${escapeHtml(ACTIVITY_VERB[a.action] || a.action)}${a.detail ? ' — '+escapeHtml(a.detail) : ''}
+          <span style="color:var(--muted-2);"> · ${fmtDate((a.createdAt||'').slice(0,10))}</span>
+        </div>
+      `).join('')}
+    </div>` : '';
+
+  openModal(statusBar + '<div style="overflow-x:auto;">' + invoicePrintHtml(inv) + '</div>' + linkHtml + activityHtml, {
     title: 'Invoice '+inv.number,
     wide: true,
     foot: `
@@ -1472,8 +1543,10 @@ function openInvoiceView(inv){
   });
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   document.getElementById('status-quickchange').addEventListener('change', async (e)=>{
+    const oldStatus = inv.status;
     inv.status = e.target.value;
     await persist('invoices', { itemIdsToSync: [] });
+    await A.logActivity('invoice', inv.id, inv.number, 'status_changed', `Status changed from ${oldStatus} to ${inv.status}`);
     toast('Status updated to '+inv.status+'.');
     closeModal();
     A.render();
@@ -1686,7 +1759,7 @@ function copyTrackingLink(link){
   }
 }
 
-Object.assign(A, { openInvoiceModal, openInvoiceView, invoicePrintHtml, nextInvoiceNumber, downloadInvoicePdf, openShareMenu, shareInvoiceAs, copyTrackingLink, normalizePhoneForWhatsApp });
+Object.assign(A, { openInvoiceModal, openInvoiceView, invoicePrintHtml, nextInvoiceNumber, downloadInvoicePdf, openShareMenu, shareInvoiceAs, copyTrackingLink, normalizePhoneForWhatsApp, ACTIVITY_VERB });
 
 })();
 (function(){
@@ -1773,6 +1846,7 @@ function openCustomerModal(existing){
       state.customers.push(draft);
     }
     if(!await persist('customers')) return;
+    await A.logActivity('customer', draft.id, draft.name, existing ? 'updated' : 'created', existing ? 'Edited customer details' : 'Added new customer');
     toast(existing ? 'Customer updated.' : 'Customer added.');
     closeModal();
     A.render();
@@ -1911,6 +1985,7 @@ function openProductModal(existing){
     if(!existing && openingStock > 0){
       await A.logStockMovements([{ productId: draft.id, delta: openingStock, reason: 'initial', reference: 'Opening stock', balanceAfter: openingStock }]);
     }
+    await A.logActivity('product', draft.id, draft.name, existing ? 'updated' : 'created', existing ? 'Edited product details' : 'Added new product');
     toast(existing ? 'Product updated.' : 'Product added.');
     closeModal();
     A.render();
@@ -2214,6 +2289,9 @@ function openPaymentModal(invoiceId, existingPayment){
       state.payments.push(draft);
     }
     if(!await persist('payments')) return;
+    const inv = invoiceById(draft.invoiceId);
+    await A.logActivity('payment', draft.id, inv ? inv.number : '', isEdit ? 'updated' : 'created',
+      `${isEdit ? 'Edited' : 'Recorded'} payment of ${money(draft.amount)} via ${draft.method}`);
     toast(isEdit ? 'Payment updated.' : 'Payment recorded.');
     closeModal();
     A.render();
@@ -2613,6 +2691,62 @@ function exportInventoryCsv(){
 }
 A.exportInventoryCsv = exportInventoryCsv;
 
+/* ================= ACTIVITY ================= */
+const ACTIVITY_ENTITY_ICON = { invoice:'file-text', customer:'users', product:'package', payment:'credit-card', reminder:'bell' };
+const ACTIVITY_ACTION_COLOR = { created:'var(--leaf-dark)', updated:'var(--amber)', deleted:'var(--danger)', status_changed:'var(--forest)' };
+
+A.pages.activity = function(){
+  const f = state.filters.activity;
+  let rows = [...state.activityLog];
+  if(f.entityType !== 'all') rows = rows.filter(a=>a.entityType===f.entityType);
+  rows.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+
+  const entityTypes = ['all','invoice','customer','product','payment','reminder'];
+
+  return `
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <div class="filter-pills">
+        ${entityTypes.map(t=>`<button class="pill ${f.entityType===t?'active':''}" data-activityfilter="${t}">${t==='all'?'All':t.charAt(0).toUpperCase()+t.slice(1)+'s'}</button>`).join('')}
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    ${rows.length ? `
+    <div style="padding:6px 4px;">
+      ${rows.slice(0,200).map(a=>`
+        <div style="display:flex;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line);align-items:flex-start;">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--leaf-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;">
+            <svg class="icon" data-feather="${ACTIVITY_ENTITY_ICON[a.entityType]||'circle'}" style="color:var(--leaf-dark);width:15px;height:15px;"></svg>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13.5px;">
+              <b>${escapeHtml(a.actorName)}</b>
+              <span style="color:${ACTIVITY_ACTION_COLOR[a.action]||'var(--muted)'};font-weight:600;"> ${escapeHtml(A.ACTIVITY_VERB[a.action] || a.action)} </span>
+              <span class="cell-muted">${a.entityType}</span>
+              ${a.entityLabel ? `<b>${escapeHtml(a.entityLabel)}</b>` : ''}
+            </div>
+            ${a.detail ? `<div class="cell-muted" style="font-size:12.5px;margin-top:2px;">${escapeHtml(a.detail)}</div>` : ''}
+            <div class="cell-muted" style="font-size:11.5px;margin-top:3px;">${fmtDate((a.createdAt||'').slice(0,10))} · ${new Date(a.createdAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+        </div>
+      `).join('')}
+      ${rows.length>200 ? `<p class="cell-muted" style="font-size:12px;padding:12px 14px 4px;">Showing the most recent 200 of ${rows.length} entries.</p>` : ''}
+    </div>
+    ` : `
+    <div class="empty-state">
+      <svg data-feather="activity"></svg>
+      <h3>No activity yet</h3>
+      <p>Every invoice, customer, product and payment change made by anyone on your team will show up here.</p>
+    </div>`}
+  </div>`;
+};
+A.afterRender.activity = function(){
+  document.querySelectorAll('[data-activityfilter]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ state.filters.activity.entityType = btn.dataset.activityfilter; A.render(); });
+  });
+};
+
 /* ================= SETTINGS ================= */
 A.pages.settings = function(){
   const s = state.settings;
@@ -2661,25 +2795,29 @@ A.pages.settings = function(){
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Users</h3>
-      <p class="desc">People with access to this business manager.</p>
+      <h3>Team</h3>
+      <p class="desc">Everyone here sees the exact same customers, invoices, stock and payments — nothing is split up per person. Every action anyone takes is recorded on the Activity page with their name attached.</p>
       <div id="users-list">
         ${s.users.map(u=>`<div class="user-row">
-          <div class="who"><div class="av">${initials(u.name)}</div><div><b>${escapeHtml(u.name)}</b><span>${escapeHtml(u.email)}</span></div></div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="role-tag">${escapeHtml(u.role)}</span>
-            ${s.users.length>1 ? `<button class="btn sm ghost" data-action="delete-user" data-id="${u.id}"><svg class="icon" data-feather="x"></svg></button>` : ''}
-          </div>
+          <div class="who"><div class="av">${initials(u.name)}</div><div><b>${escapeHtml(u.name)}</b><span>${escapeHtml((u.role||'').charAt(0).toUpperCase()+(u.role||'').slice(1))}${u.id===state.session.id?' · You':''}</span></div></div>
         </div>`).join('')}
       </div>
+      ${(state.pendingInvites||[]).length ? `
+      <div style="margin-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:var(--muted-2);font-weight:700;margin-bottom:6px;">Invited, not yet joined</div>
+        ${state.pendingInvites.map(inv=>`<div class="user-row">
+          <div class="who"><div class="av" style="background:var(--amber-light);color:var(--amber);">?</div><div><b>${escapeHtml(inv.email)}</b><span>Waiting for them to sign up · ${escapeHtml((inv.role||'').charAt(0).toUpperCase()+(inv.role||'').slice(1))}</span></div></div>
+          <button class="btn sm ghost" data-action="cancel-invite" data-id="${inv.id}" title="Cancel invite"><svg class="icon" data-feather="x"></svg></button>
+        </div>`).join('')}
+      </div>` : ''}
       <div class="row2" style="margin-top:16px;">
-        <div class="field" style="margin-bottom:8px;"><label>Name</label><input id="nu-name" type="text" placeholder="Full name"></div>
-        <div class="field" style="margin-bottom:8px;"><label>Email</label><input id="nu-email" type="email" placeholder="name@yaweefoods.com"></div>
+        <div class="field" style="margin-bottom:8px;"><label>Email to invite</label><input id="nu-email" type="email" placeholder="colleague@example.com"></div>
+        <div class="field" style="margin-bottom:8px;"><label>Role</label>
+          <select id="nu-role"><option value="staff">Staff</option><option value="manager">Manager</option></select>
+        </div>
       </div>
-      <div class="field"><label>Role</label>
-        <select id="nu-role"><option>Staff</option><option>Manager</option><option>Owner</option></select>
-      </div>
-      <button class="btn" id="add-user"><svg class="icon" data-feather="user-plus"></svg> Add user</button>
+      <button class="btn" id="add-user"><svg class="icon" data-feather="user-plus"></svg> Invite to your team</button>
+      <div class="hint" style="margin-top:8px;">There's no email sending, so let them know directly (WhatsApp, text, in person) to sign up at this same web address using that exact email address. They'll land in your business automatically, not a new empty one.</div>
     </div>
 
     <div class="card card-pad settings-section">
@@ -2732,13 +2870,18 @@ A.afterRender.settings = function(){
   });
   const btn3 = document.getElementById('add-user');
   if(btn3) btn3.addEventListener('click', async ()=>{
-    const name = document.getElementById('nu-name').value.trim();
     const email = document.getElementById('nu-email').value.trim();
     const role = document.getElementById('nu-role').value;
-    if(!name || !email){ toast('Enter a name and email.', 'error'); return; }
-    s.users.push({ id: uid('usr'), name, email, role });
-    await persist('settings');
-    toast('User added.');
+    if(!email){ toast('Enter an email address to invite.', 'error'); return; }
+    if(!A.supabase || !state.session.businessId){ toast('Not connected to Supabase.', 'error'); return; }
+    const { data, error } = await A.supabase.from('pending_invites').insert({
+      business_id: state.session.businessId, email, role, invited_by: state.session.id
+    }).select().single();
+    if(error){ toast('Could not create the invite: ' + error.message, 'error'); return; }
+    state.pendingInvites = state.pendingInvites || [];
+    state.pendingInvites.push({ id: data.id, email, role });
+    document.getElementById('nu-email').value = '';
+    toast('Invite ready — let them know to sign up with that email.');
     A.render();
   });
   const btn4 = document.getElementById('reset-data');
@@ -2978,10 +3121,12 @@ function wireGlobalEvents(){
       if(confirm('Delete this invoice? This also removes any linked payments and returns its items to stock.')){
         const inv = invoiceById(id);
         const oldItems = inv ? inv.items : [];
+        const custName = inv ? (customerById(inv.customerId)?.name || 'unknown customer') : '';
         state.invoices = state.invoices.filter(i=>i.id!==id);
         state.payments = state.payments.filter(p=>p.invoiceId!==id);
         await persist('invoices', { itemIdsToSync: [] }); await persist('payments');
         await A.adjustStockForInvoiceChange(oldItems, [], inv ? inv.number : '');
+        if(inv) await A.logActivity('invoice', inv.id, inv.number, 'deleted', `Deleted invoice for ${custName}`);
         toast('Invoice deleted.'); render();
       }
       return;
@@ -2992,8 +3137,11 @@ function wireGlobalEvents(){
     if(action === 'edit-customer') return openCustomerModal(customerById(id));
     if(action === 'delete-customer'){
       if(confirm('Delete this customer? Their invoices will remain but show as an unknown customer.')){
+        const c = A.customerById(id);
         state.customers = state.customers.filter(c=>c.id!==id);
-        await persist('customers'); toast('Customer deleted.'); render();
+        await persist('customers');
+        if(c) await A.logActivity('customer', c.id, c.name, 'deleted', 'Deleted customer');
+        toast('Customer deleted.'); render();
       }
       return;
     }
@@ -3005,8 +3153,11 @@ function wireGlobalEvents(){
     if(action === 'notify-low-stock') return A.notifyManagerLowStock();
     if(action === 'delete-product'){
       if(confirm('Delete this product from the catalogue?')){
+        const p = A.productById(id);
         state.products = state.products.filter(p=>p.id!==id);
-        await persist('products'); toast('Product deleted.'); render();
+        await persist('products');
+        if(p) await A.logActivity('product', p.id, p.name, 'deleted', 'Deleted product');
+        toast('Product deleted.'); render();
       }
       return;
     }
@@ -3022,8 +3173,12 @@ function wireGlobalEvents(){
     if(action === 'view-customer-history') return A.openCustomerHistoryModal(id);
     if(action === 'delete-payment'){
       if(confirm('Delete this payment record?')){
+        const p = state.payments.find(x=>x.id===id);
+        const inv = p ? invoiceById(p.invoiceId) : null;
         state.payments = state.payments.filter(p=>p.id!==id);
-        await persist('payments'); toast('Payment deleted.'); render();
+        await persist('payments');
+        if(p) await A.logActivity('payment', p.id, inv ? inv.number : '', 'deleted', `Deleted payment of ${money(p.amount)}`);
+        toast('Payment deleted.'); render();
       }
       return;
     }
@@ -3039,12 +3194,16 @@ function wireGlobalEvents(){
       await persist('reminders'); toast('Reminder deleted.'); render();
       return;
     }
-    if(action === 'delete-user'){
-      state.settings.users = state.settings.users.filter(u=>u.id!==id);
-      await persist('settings'); toast('User removed.'); render();
+    if(action === 'export-customers-csv') return A.exportCustomersCsv();
+    if(action === 'cancel-invite'){
+      if(!A.supabase) return;
+      const { error } = await A.supabase.from('pending_invites').delete().eq('id', id);
+      if(error){ toast('Could not cancel the invite.', 'error'); return; }
+      state.pendingInvites = (state.pendingInvites||[]).filter(i=>i.id!==id);
+      toast('Invite cancelled.');
+      render();
       return;
     }
-    if(action === 'export-customers-csv') return A.exportCustomersCsv();
     if(action === 'export-products-csv') return A.exportProductsCsv();
     if(action === 'export-inventory-csv') return A.exportInventoryCsv();
   });
