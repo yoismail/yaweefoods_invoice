@@ -1616,7 +1616,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-21.7";
+        const APP_BUILD = "2026-08-21.8";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2267,7 +2267,7 @@
                 customerById, productById, invoiceById, openModal, closeModal, toast, persist } = A;
 
             const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Cancelled'];
-            const ACTIVITY_VERB = { created: 'created this', updated: 'edited this', deleted: 'deleted this', status_changed: 'changed the status' };
+            const ACTIVITY_VERB = { created: 'created this', updated: 'edited this', deleted: 'deleted this', status_changed: 'changed the status', stock_adjusted: 'adjusted stock' };
 
             // Line items don't have a stable id of their own, so they're matched
             // between the before/after versions by product (or by name for a custom
@@ -3228,9 +3228,12 @@
                     const delta = direction === 'add' ? qty : -qty;
                     const p = state.products.find(x => x.id === product.id);
                     if (!p) return;
-                    p.stock = Math.max(0, (Number(p.stock) || 0) + delta);
+                    const oldStock = Number(p.stock) || 0;
+                    p.stock = Math.max(0, oldStock + delta);
                     if (!await persist('products')) return;
                     await A.logStockMovements([{ productId: p.id, delta, reason, reference: note, balanceAfter: p.stock }]);
+                    await A.logActivity('product', p.id, p.name, 'stock_adjusted',
+                        `${direction === 'add' ? 'Added' : 'Removed'} ${qty} (${STOCK_REASON_LABELS[reason] || reason}): stock ${oldStock} to ${p.stock}${note ? ', ' + note : ''}`);
                     toast('Stock updated.');
                     closeModal();
                     A.render();
@@ -3895,7 +3898,7 @@
 
             /* ================= ACTIVITY ================= */
             const ACTIVITY_ENTITY_ICON = { invoice: 'file-text', customer: 'users', product: 'package', payment: 'credit-card', reminder: 'bell' };
-            const ACTIVITY_ACTION_COLOR = { created: 'var(--leaf-dark)', updated: 'var(--amber)', deleted: 'var(--danger)', status_changed: 'var(--forest)' };
+            const ACTIVITY_ACTION_COLOR = { created: 'var(--leaf-dark)', updated: 'var(--amber)', deleted: 'var(--danger)', status_changed: 'var(--forest)', stock_adjusted: 'var(--leaf-dark)' };
 
             A.pages.activity = function () {
                 const f = state.filters.activity;
