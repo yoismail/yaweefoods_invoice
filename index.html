@@ -74,6 +74,11 @@ svg.icon{width:17px;height:17px;stroke-width:2;vertical-align:middle;}
 .badge.cancelled{background:#EDEEE8; color:var(--muted-2); text-decoration:line-through;}
 .badge.pending{background:var(--amber-light); color:var(--amber);}
 .badge.low{background:var(--danger-light); color:var(--danger);}
+.badge.low.blink{animation:lowStockBlink 1.4s ease-in-out infinite;}
+@keyframes lowStockBlink{
+  0%, 100% { background:var(--danger-light); color:var(--danger); }
+  50% { background:var(--danger); color:#fff; }
+}
 
 .btn{
   display:inline-flex; align-items:center; gap:7px; justify-content:center;
@@ -489,7 +494,7 @@ window.YAWEE_LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAXYAAAEtCAYAAAAcF0tRAAAAAXNSR0I
 // Settings > Preferences after deploying to confirm the live site is
 // actually running this version and not a cached older copy.
 // ---------------------------------------------------------
-const APP_BUILD = "2026-08-21.3";
+const APP_BUILD = "2026-08-21.4";
 console.log('Yawee Foods Business Manager — build ' + APP_BUILD);
 
 const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -575,6 +580,7 @@ const DEFAULT_SETTINGS = {
   taxNumber: '',
   invoicePrefix: 'YF-',
   nextInvoiceSeq: 1,
+  managerPhone: '',
   users: []
 };
 
@@ -603,8 +609,8 @@ const M = {
   reminderToDb: r => ({ id:r.id, owner_id: state.session.id, invoice_id:r.invoiceId||null, customer_id:r.customerId||null, message:r.message, due_date:r.dueDate, status:r.status }),
   reminderFromDb: r => ({ id:r.id, invoiceId:r.invoice_id, customerId:r.customer_id, message:r.message||'', dueDate:r.due_date, status:r.status||'Pending', createdAt:(r.created_at||'').slice(0,10) }),
 
-  settingsToDb: s => ({ owner_id: state.session.id, company_name:s.companyName, website:s.website, email:s.email, phone:s.phone, address:s.address, currency:s.currency, tax_rate:s.taxRate, tax_number:s.taxNumber, invoice_prefix:s.invoicePrefix, next_invoice_seq:s.nextInvoiceSeq }),
-  settingsFromDb: r => ({ companyName:r.company_name, website:r.website, email:r.email, phone:r.phone, address:r.address, currency:r.currency, taxRate:Number(r.tax_rate)||0, taxNumber:r.tax_number||'', invoicePrefix:r.invoice_prefix, nextInvoiceSeq:r.next_invoice_seq, users:[] }),
+  settingsToDb: s => ({ owner_id: state.session.id, company_name:s.companyName, website:s.website, email:s.email, phone:s.phone, address:s.address, currency:s.currency, tax_rate:s.taxRate, tax_number:s.taxNumber, invoice_prefix:s.invoicePrefix, next_invoice_seq:s.nextInvoiceSeq, manager_phone:s.managerPhone||'' }),
+  settingsFromDb: r => ({ companyName:r.company_name, website:r.website, email:r.email, phone:r.phone, address:r.address, currency:r.currency, taxRate:Number(r.tax_rate)||0, taxNumber:r.tax_number||'', invoicePrefix:r.invoice_prefix, nextInvoiceSeq:r.next_invoice_seq, managerPhone:r.manager_phone||'', users:[] }),
 };
 
 /* ---------------- Load from Supabase ---------------- */
@@ -1042,7 +1048,7 @@ A.pages.dashboard = function(){
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
           <span>${escapeHtml(p.name)}</span>
           ${Number(p.stock) <= (Number(p.reorderPoint) ?? 10)
-            ? `<span class="badge low">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))} left</span>`
+            ? `<span class="badge low blink">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))} left</span>`
             : `<span class="cell-muted mono">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))}</span>`}
         </div>
       `).join('') : `<div class="empty-state" style="padding:20px;"><p>Add products to start tracking stock.</p></div>`}
@@ -1680,7 +1686,7 @@ function copyTrackingLink(link){
   }
 }
 
-Object.assign(A, { openInvoiceModal, openInvoiceView, invoicePrintHtml, nextInvoiceNumber, downloadInvoicePdf, openShareMenu, shareInvoiceAs, copyTrackingLink });
+Object.assign(A, { openInvoiceModal, openInvoiceView, invoicePrintHtml, nextInvoiceNumber, downloadInvoicePdf, openShareMenu, shareInvoiceAs, copyTrackingLink, normalizePhoneForWhatsApp });
 
 })();
 (function(){
@@ -1782,22 +1788,32 @@ A.pages.products = function(){
     const q = f.q.toLowerCase();
     rows = rows.filter(p => p.name.toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q));
   }
-  rows.sort((a,b)=> a.name.localeCompare(b.name));
+  const isLow = p => Number(p.stock) <= (Number(p.reorderPoint) ?? 10);
+  // Low-stock products always surface first, worst shortfall first, so
+  // nothing needing attention is ever buried further down the list.
+  rows.sort((a,b)=>{
+    const aLow = isLow(a), bLow = isLow(b);
+    if(aLow !== bLow) return aLow ? -1 : 1;
+    if(aLow && bLow) return Number(a.stock) - Number(b.stock);
+    return a.name.localeCompare(b.name);
+  });
 
   const totalStockValue = state.products.reduce((s,p)=> s + (Number(p.stock)||0)*(Number(p.price)||0), 0);
-  const lowCount = state.products.filter(p=> Number(p.stock) <= (Number(p.reorderPoint) ?? 10)).length;
+  const lowStockProducts = state.products.filter(isLow);
+  const lowCount = lowStockProducts.length;
 
   return `
   <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="package"></svg> Products</div><div class="val">${state.products.length}</div></div>
-    <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="dollar-sign"></svg> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
-    <div class="card kpi-card ${lowCount>0?'':''}"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> At/below reorder point</div><div class="val" style="${lowCount>0?'color:var(--danger);':''}">${lowCount}</div></div>
+    <div class="card kpi-card"><div class="lbl"><span style="font-weight:800;font-size:15px;line-height:1;">£</span> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
+    <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> At/below reorder point</div><div class="val" style="${lowCount>0?'color:var(--danger);':''}">${lowCount}</div></div>
   </div>
 
   <div class="toolbar">
     <div class="toolbar-left">
       <div class="search-box"><svg class="icon" data-feather="search"></svg><input id="prd-search" placeholder="Search products, SKU or category" value="${escapeHtml(f.q)}"></div>
     </div>
+    ${lowCount>0 ? `<button class="btn accent" data-action="notify-low-stock"><svg class="icon" data-feather="message-circle"></svg> Notify manager (${lowCount} low)</button>` : ''}
   </div>
   <div class="card">
     ${rows.length ? `
@@ -1805,13 +1821,13 @@ A.pages.products = function(){
       <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder point</th><th></th></tr></thead>
       <tbody>
         ${rows.map(p=>{
-          const low = Number(p.stock) <= (Number(p.reorderPoint) ?? 10);
-          return `<tr>
-          <td class="cell-strong">${escapeHtml(p.name)}</td>
+          const low = isLow(p);
+          return `<tr ${low?'style="background:var(--danger-light);"':''}>
+          <td class="cell-strong" ${low?'style="color:var(--danger);"':''}>${escapeHtml(p.name)}</td>
           <td class="mono cell-muted">${escapeHtml(p.sku||'—')}</td>
           <td class="cell-muted">${escapeHtml(p.category||'—')}</td>
           <td class="mono">${money(p.price)} <span class="cell-muted">/ ${escapeHtml(p.unit||'unit')}</span></td>
-          <td>${low ? `<span class="badge low">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))}</span>` : `${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))}`}</td>
+          <td>${low ? `<span class="badge low blink">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))}</span>` : `${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit||'unit', p.stock))}`}</td>
           <td class="cell-muted">${p.reorderPoint ?? 10}</td>
           <td><div class="row-actions">
             <button class="btn sm ghost" data-action="adjust-stock" data-id="${p.id}" title="Adjust stock"><svg class="icon" data-feather="sliders"></svg></button>
@@ -1981,6 +1997,26 @@ function openStockHistoryModal(product){
   if(window.feather) feather.replace();
 }
 A.openStockHistoryModal = openStockHistoryModal;
+
+/* ---------------- Notify manager of low stock via WhatsApp ---------------- */
+function notifyManagerLowStock(){
+  const phone = (state.settings.managerPhone || '').trim();
+  if(!phone){
+    toast('Add the manager\'s WhatsApp number in Settings first.', 'error');
+    return;
+  }
+  const isLow = p => Number(p.stock) <= (Number(p.reorderPoint) ?? 10);
+  const lowProducts = state.products.filter(isLow).sort((a,b)=> Number(a.stock)-Number(b.stock));
+  if(!lowProducts.length){ toast('Nothing is currently low on stock.'); return; }
+
+  const lines = lowProducts.map(p =>
+    `- ${p.name}: ${p.stock} ${A.pluralizeUnit(p.unit||'unit', p.stock)} left (reorder at ${p.reorderPoint ?? 10})`
+  );
+  const message = `Low stock alert from ${state.settings.companyName}:\n\n${lines.join('\n')}\n\nPlease arrange restocking.`;
+  const normalizedPhone = A.normalizePhoneForWhatsApp(phone);
+  window.open(`https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`, '_blank');
+}
+A.notifyManagerLowStock = notifyManagerLowStock;
 
 })();
 (function(){
@@ -2597,6 +2633,17 @@ A.pages.settings = function(){
     </div>
 
     <div class="card card-pad settings-section">
+      <h3>Low stock alerts</h3>
+      <p class="desc">Where to send a WhatsApp alert when products fall to or below their reorder point.</p>
+      <div class="field">
+        <label>Manager's WhatsApp number</label>
+        <input id="st-manager-phone" type="text" value="${escapeHtml(s.managerPhone||'')}" placeholder="07911 123456">
+        <div class="hint">UK numbers are recognised automatically, with or without the +44.</div>
+      </div>
+      <button class="btn primary" id="save-alerts">Save alert settings</button>
+    </div>
+
+    <div class="card card-pad settings-section">
       <h3>Tax &amp; invoicing</h3>
       <p class="desc">Applied to new invoices by default.</p>
       <div class="row2">
@@ -2676,6 +2723,12 @@ A.afterRender.settings = function(){
     s.currency = document.getElementById('st-currency').value;
     await persist('settings');
     toast('Tax and invoicing settings saved.');
+  });
+  const btnAlerts = document.getElementById('save-alerts');
+  if(btnAlerts) btnAlerts.addEventListener('click', async ()=>{
+    s.managerPhone = document.getElementById('st-manager-phone').value.trim();
+    await persist('settings');
+    toast('Alert settings saved.');
   });
   const btn3 = document.getElementById('add-user');
   if(btn3) btn3.addEventListener('click', async ()=>{
@@ -2949,6 +3002,7 @@ function wireGlobalEvents(){
     if(action === 'edit-product') return openProductModal(A.productById(id));
     if(action === 'adjust-stock') return A.openAdjustStockModal(A.productById(id));
     if(action === 'stock-history') return A.openStockHistoryModal(A.productById(id));
+    if(action === 'notify-low-stock') return A.notifyManagerLowStock();
     if(action === 'delete-product'){
       if(confirm('Delete this product from the catalogue?')){
         state.products = state.products.filter(p=>p.id!==id);
