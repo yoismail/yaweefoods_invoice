@@ -1628,7 +1628,7 @@
                 reminders: [],
                 settings: null,
                 page: 'dashboard',
-                filters: { invoices: { status: 'all', q: '' }, customers: { q: '' }, products: { q: '' }, payments: { status: 'all' }, reminders: { status: 'all' } }
+                filters: { invoices: { status: 'all', q: '' }, customers: { q: '' }, products: { q: '' }, payments: { status: 'all' }, reminders: { status: 'all' }, reports: { preset: '6m', from: null, to: null } }
             };
 
             const DEFAULT_SETTINGS = {
@@ -2616,9 +2616,11 @@
             }
             function openShareMenu(inv) {
                 const c = customerById(inv.customerId);
+                const defaultBody = shareMessage(inv).body;
                 openModal(`
-    <p style="font-size:13.5px;color:var(--muted);margin:0 0 16px;">Choose how to send invoice ${escapeHtml(inv.number)}${c ? ' to ' + escapeHtml(c.name) : ''}. Where your browser supports it, the actual PDF attaches, not just a link.</p>
-    <div style="display:flex;flex-direction:column;gap:10px;">
+    <p style="font-size:13.5px;color:var(--muted);margin:0 0 14px;">Add anything you'd like before sending${c ? ' to ' + escapeHtml(c.name) : ''}. The link to view the invoice stays in the message automatically. Where your browser supports it, the actual PDF attaches too, not just the link.</p>
+    <div class="field"><label>Message</label><textarea id="share-message-text" rows="7">${escapeHtml(defaultBody)}</textarea></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">
       <button class="btn" style="justify-content:flex-start;padding:14px 16px;" data-action="share-whatsapp" data-id="${inv.id}" ${c && c.phone ? '' : 'disabled title="No phone number on file for this customer"'}>
         <svg class="icon" data-feather="message-circle" style="color:#25D366;"></svg>&nbsp; Share via WhatsApp
       </button>
@@ -2628,6 +2630,7 @@
     </div>
   `, {
                     title: 'Share invoice',
+                    wide: true,
                     foot: '<button class="btn ghost" id="modal-cancel">Cancel</button>'
                 });
                 document.getElementById('modal-cancel').addEventListener('click', closeModal);
@@ -2638,6 +2641,9 @@
                 const c = customerById(inv.customerId);
                 if (channel === 'whatsapp' && (!c || !c.phone)) { toast('This customer has no phone number on file.', 'error'); return; }
                 if (channel === 'email' && (!c || !c.email)) { toast('This customer has no email on file.', 'error'); return; }
+                // Grab whatever's in the message box before the modal closes and wipes it.
+                const textarea = document.getElementById('share-message-text');
+                const customBody = textarea ? textarea.value : null;
                 closeModal();
                 toast('Preparing PDF…');
 
@@ -2649,7 +2655,8 @@
                     return;
                 }
                 const filename = pdfFileName(inv);
-                const { subject, body } = shareMessage(inv);
+                const { subject, body: defaultBody } = shareMessage(inv);
+                const body = (customBody && customBody.trim()) ? customBody : defaultBody;
 
                 // Where the browser can share an actual file (most mobile browsers,
                 // including the ones behind WhatsApp/Mail share sheets), hand the PDF
@@ -3165,56 +3172,112 @@
         (function () {
             "use strict";
             const A = window.YaweeApp;
-            const { state, money, fmtDate, todayISO, escapeHtml, uid, openModal, closeModal, toast, persist,
+            const { state, money, fmtDate, todayISO, addDays, escapeHtml, uid, openModal, closeModal, toast, persist,
                 invoiceTotals, invoiceStatus, customerById, initials } = A;
 
             /* ================= REPORTS ================= */
-            function lastNMonths(n) {
-                const out = [];
-                const d = new Date();
-                d.setDate(1);
-                for (let i = n - 1; i >= 0; i--) {
-                    const dd = new Date(d.getFullYear(), d.getMonth() - i, 1);
-                    out.push({ key: dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0'), label: dd.toLocaleDateString('en-GB', { month: 'short' }) });
+            const REPORT_PRESETS = [
+                { id: '30d', label: '30 days' },
+                { id: '3m', label: '3 months' },
+                { id: '6m', label: '6 months' },
+                { id: '12m', label: '12 months' },
+                { id: 'ytd', label: 'This year' },
+                { id: 'all', label: 'All time' },
+                { id: 'custom', label: 'Custom' },
+            ];
+
+            function reportsDateRange() {
+                const f = state.filters.reports;
+                const today = todayISO();
+                if (f.preset === 'custom') {
+                    return { from: f.from || addDays(today, -182), to: f.to || today };
                 }
-                return out;
+                if (f.preset === 'ytd') return { from: today.slice(0, 4) + '-01-01', to: today };
+                if (f.preset === 'all') return { from: '2000-01-01', to: today };
+                const daysByPreset = { '30d': 30, '3m': 91, '6m': 182, '12m': 365 };
+                const days = daysByPreset[f.preset] || 182;
+                return { from: addDays(today, -days), to: today };
+            }
+
+            // Monthly buckets spanning the selected range, most recent 12 shown at most
+            // so a long "All time" range still renders as a readable chart rather than
+            // an unreadable wall of bars.
+            function monthsInRange(fromISO, toISO, maxBars) {
+                const start = new Date(fromISO + 'T00:00:00');
+                const end = new Date(toISO + 'T00:00:00');
+                const startBound = new Date(start.getFullYear(), start.getMonth(), 1);
+                const months = [];
+                let d = new Date(end.getFullYear(), end.getMonth(), 1);
+                while (d >= startBound && months.length < maxBars) {
+                    const sameYear = d.getFullYear() === end.getFullYear();
+                    months.unshift({
+                        key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'),
+                        label: d.toLocaleDateString('en-GB', sameYear ? { month: 'short' } : { month: 'short', year: '2-digit' })
+                    });
+                    d = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+                }
+                return months;
+            }
+
+            function invoicesInReportRange() {
+                const { from, to } = reportsDateRange();
+                return state.invoices.filter(i => i.status !== 'Cancelled' && i.issueDate && i.issueDate >= from && i.issueDate <= to);
             }
 
             A.pages.reports = function () {
-                const months = lastNMonths(6);
+                const { from, to } = reportsDateRange();
+                const f = state.filters.reports;
+                const inRange = invoicesInReportRange();
+
+                const months = monthsInRange(from, to, 12);
                 const revenueByMonth = {};
                 months.forEach(m => revenueByMonth[m.key] = 0);
-                state.invoices.filter(i => i.status !== 'Cancelled').forEach(inv => {
+                inRange.forEach(inv => {
                     const key = (inv.issueDate || '').slice(0, 7);
                     if (revenueByMonth[key] !== undefined) revenueByMonth[key] += invoiceTotals(inv).total;
                 });
                 const maxRev = Math.max(1, ...Object.values(revenueByMonth));
 
                 const custTotals = {};
-                state.invoices.filter(i => i.status !== 'Cancelled').forEach(inv => {
+                inRange.forEach(inv => {
                     custTotals[inv.customerId] = (custTotals[inv.customerId] || 0) + invoiceTotals(inv).total;
                 });
-                const topCustomers = Object.entries(custTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                const allCustomers = Object.entries(custTotals).sort((a, b) => b[1] - a[1]);
+                const topCustomers = allCustomers.slice(0, 5);
                 const maxCust = Math.max(1, ...topCustomers.map(x => x[1]));
 
                 const prodTotals = {};
-                state.invoices.filter(i => i.status !== 'Cancelled').forEach(inv => {
+                inRange.forEach(inv => {
                     inv.items.forEach(it => {
                         prodTotals[it.name] = (prodTotals[it.name] || 0) + (Number(it.qty) || 0) * (Number(it.price) || 0);
                     });
                 });
-                const topProducts = Object.entries(prodTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                const allProducts = Object.entries(prodTotals).sort((a, b) => b[1] - a[1]);
+                const topProducts = allProducts.slice(0, 5);
                 const maxProd = Math.max(1, ...topProducts.map(x => x[1]));
 
-                const totalOutstanding = state.invoices.filter(i => i.status !== 'Cancelled').reduce((s, i) => s + invoiceTotals(i).balance, 0);
+                const totalOutstanding = inRange.reduce((s, i) => s + invoiceTotals(i).balance, 0);
                 const draftCount = state.invoices.filter(i => i.status === 'Draft').length;
-                const paidCount = state.invoices.filter(i => invoiceStatus(i) === 'Paid').length;
-                const overdueCount = state.invoices.filter(i => invoiceStatus(i) === 'Overdue').length;
+                const paidCount = inRange.filter(i => invoiceStatus(i) === 'Paid').length;
+                const overdueCount = inRange.filter(i => invoiceStatus(i) === 'Overdue').length;
 
                 return `
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <div class="filter-pills">
+        ${REPORT_PRESETS.map(p => `<button class="pill ${f.preset === p.id ? 'active' : ''}" data-reportpreset="${p.id}">${p.label}</button>`).join('')}
+      </div>
+      ${f.preset === 'custom' ? `
+        <input type="date" id="report-from" value="${from}" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+        <span class="cell-muted" style="font-size:13px;">to</span>
+        <input type="date" id="report-to" value="${to}" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+      ` : `<span class="cell-muted" style="font-size:12.5px;">${fmtDate(from)} – ${fmtDate(to)}</span>`}
+    </div>
+  </div>
+
   <div class="card chart-card" style="margin-bottom:20px;">
-    <h3 style="margin:0 0 4px;font-size:15px;">Revenue, last 6 months</h3>
-    <p class="cell-muted" style="font-size:12.5px;margin:0 0 6px;">Based on invoice issue date, excluding cancelled invoices.</p>
+    <h3 style="margin:0 0 4px;font-size:15px;">Revenue</h3>
+    <p class="cell-muted" style="font-size:12.5px;margin:0 0 6px;">Based on invoice issue date within the selected range, excluding cancelled invoices.</p>
     <div class="bar-chart">
       ${months.map(m => {
                     const v = revenueByMonth[m.key];
@@ -3230,7 +3293,10 @@
 
   <div class="row2" style="margin-bottom:20px;">
     <div class="card chart-card">
-      <h3 style="margin:0 0 16px;font-size:15px;">Top customers by revenue</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:15px;">Top customers by revenue</h3>
+        <button class="btn sm ghost" data-action="export-customers-csv" title="Download full customer revenue report as CSV"><svg class="icon" data-feather="download"></svg> CSV</button>
+      </div>
       ${topCustomers.length ? topCustomers.map(([cid, total]) => {
                     const c = customerById(cid);
                     const pct = Math.round((total / maxCust) * 100);
@@ -3239,10 +3305,14 @@
           <div class="track"><div class="fill" style="width:${pct}%;"></div></div>
           <div class="amt">${money(total)}</div>
         </div>`;
-                }).join('') : `<p class="cell-muted" style="font-size:13px;">No invoiced revenue yet.</p>`}
+                }).join('') : `<p class="cell-muted" style="font-size:13px;">No invoiced revenue in this range.</p>`}
+      ${allCustomers.length > 5 ? `<p class="cell-muted" style="font-size:12px;margin:10px 0 0;">Showing top 5 of ${allCustomers.length}. Download the CSV for the full list.</p>` : ''}
     </div>
     <div class="card chart-card">
-      <h3 style="margin:0 0 16px;font-size:15px;">Top products by revenue</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:15px;">Top products by revenue</h3>
+        <button class="btn sm ghost" data-action="export-products-csv" title="Download full product revenue report as CSV"><svg class="icon" data-feather="download"></svg> CSV</button>
+      </div>
       ${topProducts.length ? topProducts.map(([name, total]) => {
                     const pct = Math.round((total / maxProd) * 100);
                     return `<div class="hbar-row">
@@ -3250,7 +3320,8 @@
           <div class="track"><div class="fill" style="width:${pct}%;"></div></div>
           <div class="amt">${money(total)}</div>
         </div>`;
-                }).join('') : `<p class="cell-muted" style="font-size:13px;">No invoiced revenue yet.</p>`}
+                }).join('') : `<p class="cell-muted" style="font-size:13px;">No invoiced revenue in this range.</p>`}
+      ${allProducts.length > 5 ? `<p class="cell-muted" style="font-size:12px;margin:10px 0 0;">Showing top 5 of ${allProducts.length}. Download the CSV for the full list.</p>` : ''}
     </div>
   </div>
 
@@ -3259,12 +3330,86 @@
     <div class="kpi-grid" style="margin-bottom:0;">
       <div><div class="cell-muted" style="font-size:12px;">Outstanding balance</div><div class="display" style="font-size:20px;font-weight:700;">${money(totalOutstanding)}</div></div>
       <div><div class="cell-muted" style="font-size:12px;">Draft</div><div class="display" style="font-size:20px;font-weight:700;">${draftCount}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">Paid</div><div class="display" style="font-size:20px;font-weight:700;">${paidCount}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">Overdue</div><div class="display" style="font-size:20px;font-weight:700;color:var(--danger);">${overdueCount}</div></div>
+      <div><div class="cell-muted" style="font-size:12px;">Paid (in range)</div><div class="display" style="font-size:20px;font-weight:700;">${paidCount}</div></div>
+      <div><div class="cell-muted" style="font-size:12px;">Overdue (in range)</div><div class="display" style="font-size:20px;font-weight:700;color:var(--danger);">${overdueCount}</div></div>
     </div>
   </div>
   `;
             };
+
+            A.afterRender.reports = function () {
+                document.querySelectorAll('[data-reportpreset]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        state.filters.reports.preset = btn.dataset.reportpreset;
+                        A.render();
+                    });
+                });
+                const fromInput = document.getElementById('report-from');
+                const toInput = document.getElementById('report-to');
+                if (fromInput) fromInput.addEventListener('change', () => { state.filters.reports.from = fromInput.value; A.render(); });
+                if (toInput) toInput.addEventListener('change', () => { state.filters.reports.to = toInput.value; A.render(); });
+            };
+
+            /* ---------------- CSV export ---------------- */
+            function toCsvCell(v) {
+                const s = String(v ?? '');
+                return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+            }
+            function downloadCsv(filename, rows) {
+                const csv = rows.map(row => row.map(toCsvCell).join(',')).join('\r\n');
+                // Leading BOM so Excel opens UTF-8 (£ signs, etc.) correctly rather than mangling it.
+                const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = filename;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 4000);
+            }
+
+            function exportCustomersCsv() {
+                const { from, to } = reportsDateRange();
+                const inRange = invoicesInReportRange();
+                const byCustomer = {};
+                inRange.forEach(inv => {
+                    const t = invoiceTotals(inv);
+                    if (!byCustomer[inv.customerId]) byCustomer[inv.customerId] = { invoiceCount: 0, revenue: 0, paid: 0, outstanding: 0 };
+                    byCustomer[inv.customerId].invoiceCount++;
+                    byCustomer[inv.customerId].revenue += t.total;
+                    byCustomer[inv.customerId].paid += t.paid;
+                    byCustomer[inv.customerId].outstanding += t.balance;
+                });
+                const rows = [['Customer', 'Email', 'Phone', 'Invoices', 'Revenue (GBP)', 'Paid (GBP)', 'Outstanding (GBP)']];
+                Object.entries(byCustomer)
+                    .map(([cid, stats]) => ({ c: customerById(cid), ...stats }))
+                    .filter(r => r.c)
+                    .sort((a, b) => b.revenue - a.revenue)
+                    .forEach(r => rows.push([r.c.name, r.c.email, r.c.phone, r.invoiceCount, r.revenue.toFixed(2), r.paid.toFixed(2), r.outstanding.toFixed(2)]));
+                if (rows.length === 1) rows.push(['No invoiced revenue in this date range.']);
+                downloadCsv(`customers-by-revenue_${from}_to_${to}.csv`, rows);
+                toast('Customer revenue CSV downloaded.');
+            }
+
+            function exportProductsCsv() {
+                const { from, to } = reportsDateRange();
+                const inRange = invoicesInReportRange();
+                const byProduct = {};
+                inRange.forEach(inv => {
+                    inv.items.forEach(it => {
+                        if (!byProduct[it.name]) byProduct[it.name] = { qty: 0, revenue: 0, unit: it.unit || '' };
+                        byProduct[it.name].qty += Number(it.qty) || 0;
+                        byProduct[it.name].revenue += (Number(it.qty) || 0) * (Number(it.price) || 0);
+                    });
+                });
+                const rows = [['Product', 'Unit', 'Quantity sold', 'Revenue (GBP)']];
+                Object.entries(byProduct)
+                    .sort((a, b) => b[1].revenue - a[1].revenue)
+                    .forEach(([name, s]) => rows.push([name, s.unit, s.qty, s.revenue.toFixed(2)]));
+                if (rows.length === 1) rows.push(['No invoiced revenue in this date range.']);
+                downloadCsv(`products-by-revenue_${from}_to_${to}.csv`, rows);
+                toast('Product revenue CSV downloaded.');
+            }
+            A.exportCustomersCsv = exportCustomersCsv;
+            A.exportProductsCsv = exportProductsCsv;
 
             /* ================= SETTINGS ================= */
             A.pages.settings = function () {
@@ -3673,6 +3818,8 @@
                         await persist('settings'); toast('User removed.'); render();
                         return;
                     }
+                    if (action === 'export-customers-csv') return A.exportCustomersCsv();
+                    if (action === 'export-products-csv') return A.exportProductsCsv();
                 });
 
                 document.addEventListener('input', (e) => {
