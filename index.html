@@ -986,48 +986,81 @@
         }
 
         /* ---------- Invoice items editor ---------- */
-        .items-table {
+        .item-card {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+            background: #FAFBF8;
+        }
+
+        .item-card input,
+        .item-card select {
             width: 100%;
-            border-collapse: collapse;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
+            font-size: 16px;
+            background: #fff;
+            color: var(--ink);
+            outline: none;
+            transition: .15s;
+        }
+
+        .item-card input:focus,
+        .item-card select:focus {
+            border-color: var(--leaf);
+            box-shadow: 0 0 0 3px var(--leaf-light);
+        }
+
+        .item-card-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin-bottom: 10px;
         }
 
-        .items-table th {
-            font-size: 11px;
-            text-transform: uppercase;
-            color: var(--muted-2);
-            text-align: left;
-            padding: 0 8px 8px;
-            font-weight: 700;
+        .item-card-head select {
+            flex: 1;
+            min-width: 0;
         }
 
-        .items-table td {
-            padding: 5px 8px;
-            vertical-align: middle;
+        .item-card-head .item-remove {
+            flex-shrink: 0;
         }
 
-        .items-table input,
-        .items-table select {
-            padding: 7px 9px;
-            font-size: 16px;
+        .item-card input.item-name {
+            width: 100%;
+            margin-bottom: 10px;
         }
 
-        .items-table .qty-in {
-            width: 60px;
+        .item-card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 8px;
+            align-items: end;
         }
 
-        .items-table .price-in {
-            width: 90px;
-        }
-
-        .items-table .amt {
+        .item-card-grid label {
+            display: block;
+            font-size: 10.5px;
             font-weight: 600;
-            white-space: nowrap;
-            font-family: 'JetBrains Mono';
+            color: var(--muted-2);
+            text-transform: uppercase;
+            margin-bottom: 4px;
         }
 
-        .items-table .rm-row {
-            width: 30px;
+        .item-card-grid .amt-box {
+            font-weight: 600;
+            font-family: 'JetBrains Mono';
+            padding: 10px 0;
+            font-size: 14px;
+        }
+
+        @media (max-width:560px) {
+            .item-card-grid {
+                grid-template-columns: 1fr 1fr;
+            }
         }
 
         .totals-box {
@@ -1565,7 +1598,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-21.1";
+        const APP_BUILD = "2026-08-21.2";
         console.log('Yawee Foods Business Manager — build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2170,22 +2203,24 @@
                 const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} — ${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))} in stock</option>`).join('');
                 const amt = (Number(item.qty) || 0) * (Number(item.price) || 0);
                 const linkedProduct = item.productId ? productById(item.productId) : null;
-                const stockHint = linkedProduct ? `<div class="cell-muted stock-hint" style="font-size:11px;margin-top:3px;">${stockHintText(linkedProduct, item.qty)}</div>` : '';
-                return `<tr data-row="${idx}">
-    <td>
+                const stockHint = linkedProduct ? `<div class="cell-muted stock-hint" style="font-size:11px;margin:-4px 0 10px;">${stockHintText(linkedProduct, item.qty)}</div>` : '';
+                return `<div class="item-card" data-row="${idx}">
+    <div class="item-card-head">
       <select class="item-product" data-idx="${idx}">
         <option value="">Custom item</option>
         ${options}
       </select>
-      ${stockHint}
-    </td>
-    <td><input class="item-name" data-idx="${idx}" type="text" value="${escapeHtml(item.name)}" placeholder="Item description"></td>
-    <td><input class="item-qty qty-in" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></td>
-    <td><input class="item-unit" data-idx="${idx}" type="text" value="${escapeHtml(item.unit || '')}" placeholder="unit" style="width:76px;" ${linkedProduct ? 'readonly' : ''}></td>
-    <td><input class="item-price price-in" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></td>
-    <td class="amt">${money(amt)}</td>
-    <td class="rm-row"><button type="button" class="btn sm ghost item-remove" data-idx="${idx}"><svg class="icon" data-feather="x"></svg></button></td>
-  </tr>`;
+      <button type="button" class="btn sm ghost item-remove" data-idx="${idx}" title="Remove this line"><svg class="icon" data-feather="x"></svg></button>
+    </div>
+    <input class="item-name" data-idx="${idx}" type="text" value="${escapeHtml(item.name)}" placeholder="Item description">
+    ${stockHint}
+    <div class="item-card-grid">
+      <div><label>Qty</label><input class="item-qty" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></div>
+      <div><label>Unit</label><input class="item-unit" data-idx="${idx}" type="text" value="${escapeHtml(item.unit || '')}" placeholder="unit" ${linkedProduct ? 'readonly' : ''}></div>
+      <div><label>Unit price (£)</label><input class="item-price" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></div>
+      <div><label>Amount</label><div class="amt-box">${money(amt)}</div></div>
+    </div>
+  </div>`;
             }
             function stockHintText(product, enteredQty) {
                 const qty = Number(enteredQty) || 0;
@@ -2213,12 +2248,9 @@
   </div>
 
   <label style="display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:6px 0 8px;">Line items</label>
-  <table class="items-table" id="items-table">
-    <thead><tr><th style="width:20%;">Product</th><th>Description</th><th>Qty</th><th>Unit</th><th>Unit price</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
-    <tbody id="items-body">
-      ${draft.items.map((it, idx) => lineItemRow(it, idx)).join('')}
-    </tbody>
-  </table>
+  <div id="items-body">
+    ${draft.items.map((it, idx) => lineItemRow(it, idx)).join('')}
+  </div>
   <button type="button" class="btn sm ghost" id="add-item"><svg class="icon" data-feather="plus"></svg> Add line item</button>
 
   <div class="totals-box">
@@ -2268,7 +2300,14 @@
                             const idx = Number(sel.dataset.idx);
                             const p = productById(sel.value);
                             if (p) { draft.items[idx].productId = p.id; draft.items[idx].name = p.name; draft.items[idx].price = p.price; draft.items[idx].unit = p.unit || ''; }
-                            else { draft.items[idx].productId = ''; draft.items[idx].unit = ''; }
+                            else {
+                                // Switching back to "Custom item" — clear the old product's name,
+                                // price and unit too, not just its id, so nothing stale lingers.
+                                draft.items[idx].productId = '';
+                                draft.items[idx].name = '';
+                                draft.items[idx].price = 0;
+                                draft.items[idx].unit = '';
+                            }
                             refreshItemsTable();
                         });
                     });
@@ -2294,7 +2333,7 @@
                     });
                 }
                 function refreshStockHint(idx) {
-                    const row = document.querySelector('tr[data-row="' + idx + '"]');
+                    const row = document.querySelector('.item-card[data-row="' + idx + '"]');
                     if (!row) return;
                     const it = draft.items[idx];
                     const linkedProduct = it.productId ? productById(it.productId) : null;
@@ -2302,10 +2341,10 @@
                     if (hintEl && linkedProduct) hintEl.innerHTML = stockHintText(linkedProduct, it.qty);
                 }
                 function refreshRowAmount(idx) {
-                    const row = document.querySelector('tr[data-row="' + idx + '"]');
+                    const row = document.querySelector('.item-card[data-row="' + idx + '"]');
                     if (!row) return;
                     const it = draft.items[idx];
-                    row.querySelector('.amt').textContent = money((Number(it.qty) || 0) * (Number(it.price) || 0));
+                    row.querySelector('.amt-box').textContent = money((Number(it.qty) || 0) * (Number(it.price) || 0));
                 }
                 function refreshItemsTable() {
                     document.getElementById('items-body').innerHTML = draft.items.map((it, idx) => lineItemRow(it, idx)).join('');
