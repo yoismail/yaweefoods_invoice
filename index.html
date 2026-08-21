@@ -2390,6 +2390,7 @@
                 const c = customerById(inv.customerId);
                 const t = invoiceTotals(inv);
                 const s = state.settings;
+                const paymentsForInvoice = state.payments.filter(p => p.invoiceId === inv.id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 return `
   <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:100%;max-width:210mm;box-sizing:border-box;padding:20px;margin:0 auto;background:#fff;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #123B24;padding-bottom:18px;margin-bottom:22px;">
@@ -2442,9 +2443,21 @@
         ${t.deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(t.deliveryFee)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax (${inv.taxRate}%)</span><span style="font-family:monospace;">${money(t.tax)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #123B24;margin-top:4px;font-weight:700;font-size:16px;"><span>Total due</span><span style="font-family:monospace;">${money(t.total)}</span></div>
-        ${t.paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;color:#68705F;"><span>Paid</span><span style="font-family:monospace;">${money(t.paid)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;"><span>Balance</span><span style="font-family:monospace;">${money(t.balance)}</span></div>` : ''}
+        ${t.paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;"><span>Balance</span><span style="font-family:monospace;">${money(t.balance)}</span></div>` : ''}
       </div>
+      ${paymentsForInvoice.length ? `
+      <div style="margin-top:24px;border-top:1px solid #E3E7DD;padding-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:8px;">Payments received</div>
+        <table style="width:100%;border-collapse:collapse;">
+          <tbody>
+            ${paymentsForInvoice.map(p => `<tr>
+              <td style="padding:4px 4px 4px 0;font-size:12.5px;color:#68705F;">${fmtDate(p.date)}</td>
+              <td style="padding:4px;font-size:12.5px;color:#68705F;">${escapeHtml(p.method || '')}</td>
+              <td style="padding:4px 0 4px 4px;font-size:12.5px;text-align:right;font-family:monospace;">${money(p.amount)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
       ${inv.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b style="color:#12140F;">Notes: </b>${escapeHtml(inv.notes)}</div>` : ''}
       <div style="margin-top:20px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
     </div>
@@ -3933,6 +3946,19 @@
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #123B24;margin-top:4px;font-weight:700;font-size:15px;"><span>Total</span><span style="font-family:monospace;">${money(total)}</span></div>
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;color:#C0392B;"><span>Balance due</span><span style="font-family:monospace;">${money(balance)}</span></div>` : `<div style="padding:6px 0;font-size:13px;font-weight:700;color:#1F8C4C;">Paid in full</div>`}
     </div>
+    ${(data.payments && data.payments.length) ? `
+    <div style="margin-top:24px;border-top:1px solid #E3E7DD;padding-top:14px;">
+      <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:8px;">Payments received</div>
+      <table style="width:100%;border-collapse:collapse;">
+        <tbody>
+          ${data.payments.map(p => `<tr>
+            <td style="padding:4px 4px 4px 0;font-size:12.5px;color:#68705F;">${fmtDate(p.date)}</td>
+            <td style="padding:4px;font-size:12.5px;color:#68705F;">${escapeHtml(p.method || '')}</td>
+            <td style="padding:4px 0 4px 4px;font-size:12.5px;text-align:right;font-family:monospace;">${money(p.amount)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
     ${data.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b>Notes: </b>${escapeHtml(data.notes)}</div>` : ''}
     <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(c.name || '')}.</div>
   `;
