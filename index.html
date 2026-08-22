@@ -1674,7 +1674,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.1";
+        const APP_BUILD = "2026-08-22.2";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -4159,14 +4159,22 @@
                     const ok = await persist('all');
                     // stock_movements and activity_log are append-only logs, never touched
                     // by persist()'s normal upsert/prune, so they need clearing directly.
+                    let logsCleared = true;
                     if (A.supabase && state.session && state.session.businessId) {
-                        await A.supabase.from('stock_movements').delete().eq('business_id', state.session.businessId);
-                        await A.supabase.from('activity_log').delete().eq('business_id', state.session.businessId);
+                        const { error: stockErr } = await A.supabase.from('stock_movements').delete().eq('business_id', state.session.businessId);
+                        const { error: actErr } = await A.supabase.from('activity_log').delete().eq('business_id', state.session.businessId);
+                        if (stockErr) console.error('Could not clear stock history:', stockErr);
+                        if (actErr) console.error('Could not clear activity history:', actErr);
+                        logsCleared = !stockErr && !actErr;
                     }
                     state.stockMovements = [];
                     state.activityLog = [];
                     if (ok) await A.logActivity('business', null, s.companyName, 'reset', 'All business data was reset');
-                    toast('All business data has been reset.');
+                    if (ok && logsCleared) {
+                        toast('All business data has been reset.');
+                    } else {
+                        toast('Reset finished, but stock or activity history may not have fully cleared. Refresh to check, and see the console for details.', 'error');
+                    }
                     A.render();
                 });
             };
