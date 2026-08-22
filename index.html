@@ -1674,7 +1674,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.4";
+        const APP_BUILD = "2026-08-22.5";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -1776,8 +1776,8 @@
                 customerToDb: c => ({ id: c.id, owner_id: state.session.id, business_id: state.session.businessId, name: c.name, email: c.email, phone: c.phone, address: c.address, notes: c.notes }),
                 customerFromDb: r => ({ id: r.id, name: r.name, email: r.email || '', phone: r.phone || '', address: r.address || '', notes: r.notes || '', createdAt: (r.created_at || '').slice(0, 10) }),
 
-                productToDb: p => ({ id: p.id, owner_id: state.session.id, business_id: state.session.businessId, name: p.name, sku: p.sku, category: p.category, price: p.price, unit: p.unit, stock: p.stock, reorder_point: p.reorderPoint ?? 10, description: p.description }),
-                productFromDb: r => ({ id: r.id, name: r.name, sku: r.sku || '', category: r.category || '', price: Number(r.price) || 0, unit: r.unit || 'unit', stock: Number(r.stock) || 0, reorderPoint: Number(r.reorder_point ?? 10), description: r.description || '' }),
+                productToDb: p => ({ id: p.id, owner_id: state.session.id, business_id: state.session.businessId, name: p.name, sku: p.sku, category: p.category, price: p.price, unit: p.unit, stock: p.stock, reorder_point: p.reorderPoint ?? 10, expiry_date: p.expiryDate || null, description: p.description }),
+                productFromDb: r => ({ id: r.id, name: r.name, sku: r.sku || '', category: r.category || '', price: Number(r.price) || 0, unit: r.unit || 'unit', stock: Number(r.stock) || 0, reorderPoint: Number(r.reorder_point ?? 10), expiryDate: r.expiry_date || '', description: r.description || '' }),
 
                 stockMovementToDb: m => ({ id: m.id, owner_id: state.session.id, business_id: state.session.businessId, product_id: m.productId, delta: m.delta, reason: m.reason, reference: m.reference || '', balance_after: m.balanceAfter }),
                 stockMovementFromDb: r => ({ id: r.id, productId: r.product_id, delta: Number(r.delta) || 0, reason: r.reason, reference: r.reference || '', balanceAfter: Number(r.balance_after) || 0, createdAt: r.created_at }),
@@ -2635,7 +2635,7 @@
                         if (!item.productId && item.name.trim()) {
                             const newProduct = {
                                 id: uid(), name: item.name.trim(), sku: '', category: '',
-                                price: Number(item.price) || 0, unit: item.unit || 'unit', stock: 0, reorderPoint: 10, description: ''
+                                price: Number(item.price) || 0, unit: item.unit || 'unit', stock: 0, reorderPoint: 10, expiryDate: '', description: ''
                             };
                             state.products.push(newProduct);
                             item.productId = newProduct.id;
@@ -3052,7 +3052,7 @@
         (function () {
             "use strict";
             const A = window.YaweeApp;
-            const { state, money, fmtDate, escapeHtml, uid, openModal, closeModal, toast, persist, customerStats, invoiceById } = A;
+            const { state, money, fmtDate, todayISO, escapeHtml, uid, openModal, closeModal, toast, persist, customerStats, invoiceById } = A;
 
             /* ================= CUSTOMERS ================= */
             A.pages.customers = function () {
@@ -3154,18 +3154,32 @@
                     rows = rows.filter(p => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q));
                 }
                 const isLow = p => Number(p.stock) <= (Number(p.reorderPoint) ?? 10);
-                // Low-stock products always surface first, worst shortfall first, so
-                // nothing needing attention is ever buried further down the list.
+                const daysToExpiry = p => p.expiryDate ? Math.round((new Date(p.expiryDate + 'T00:00:00') - new Date(todayISO() + 'T00:00:00')) / 86400000) : null;
+                const isNearExpiry = p => { const d = daysToExpiry(p); return d !== null && d <= 30; };
+                const isUrgent = p => isLow(p) || isNearExpiry(p);
+                // Anything low on stock or a month or less from expiring surfaces first,
+                // most urgent first, so nothing needing attention is ever buried further
+                // down the list. Within the urgent group, whichever is closer to actually
+                // expiring wins, since spoiled stock is worse than merely low stock.
                 rows.sort((a, b) => {
-                    const aLow = isLow(a), bLow = isLow(b);
-                    if (aLow !== bLow) return aLow ? -1 : 1;
-                    if (aLow && bLow) return Number(a.stock) - Number(b.stock);
+                    const aUrg = isUrgent(a), bUrg = isUrgent(b);
+                    if (aUrg !== bUrg) return aUrg ? -1 : 1;
+                    if (aUrg && bUrg) {
+                        const aDays = daysToExpiry(a), bDays = daysToExpiry(b);
+                        if (aDays !== null || bDays !== null) {
+                            if (aDays === null) return 1;
+                            if (bDays === null) return -1;
+                            return aDays - bDays;
+                        }
+                        return Number(a.stock) - Number(b.stock);
+                    }
                     return a.name.localeCompare(b.name);
                 });
 
                 const totalStockValue = state.products.reduce((s, p) => s + (Number(p.stock) || 0) * (Number(p.price) || 0), 0);
                 const lowStockProducts = state.products.filter(isLow);
                 const lowCount = lowStockProducts.length;
+                const nearExpiryCount = state.products.filter(isNearExpiry).length;
 
                 return `
   <div class="kpi-grid cols-3" style="margin-bottom:20px;">
@@ -3173,6 +3187,7 @@
     <div class="card kpi-card"><div class="lbl"><span style="font-weight:800;font-size:15px;line-height:1;">£</span> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> At/below reorder point</div><div class="val" style="${lowCount > 0 ? 'color:var(--danger);' : ''}">${lowCount}</div></div>
   </div>
+  ${nearExpiryCount > 0 ? `<div class="card kpi-card" style="margin-bottom:20px;"><div class="lbl"><svg class="icon" data-feather="clock"></svg> Expiring within 30 days</div><div class="val" style="color:var(--danger);">${nearExpiryCount}</div></div>` : ''}
 
   <div class="toolbar">
     <div class="toolbar-left">
@@ -3183,17 +3198,30 @@
   <div class="card">
     ${rows.length ? `
     <div class="table-wrap"><table>
-      <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder point</th><th></th></tr></thead>
+      <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder point</th><th>Expiry</th><th></th></tr></thead>
       <tbody>
         ${rows.map(p => {
                     const low = isLow(p);
-                    return `<tr ${low ? 'style="background:var(--danger-light);"' : ''}>
-          <td class="cell-strong" ${low ? 'style="color:var(--danger);"' : ''}>${escapeHtml(p.name)}</td>
+                    const nearExp = isNearExpiry(p);
+                    const urgent = low || nearExp;
+                    const days = daysToExpiry(p);
+                    let expiryCell = '<span class="cell-muted">-</span>';
+                    if (p.expiryDate) {
+                        if (nearExp) {
+                            const label = days < 0 ? `Expired ${Math.abs(days)}d ago` : (days === 0 ? 'Expires today' : `Expires in ${days}d`);
+                            expiryCell = `<span class="badge danger blink">${escapeHtml(label)}</span>`;
+                        } else {
+                            expiryCell = `<span class="cell-muted">${fmtDate(p.expiryDate)}</span>`;
+                        }
+                    }
+                    return `<tr ${urgent ? 'style="background:var(--danger-light);"' : ''}>
+          <td class="cell-strong" ${urgent ? 'style="color:var(--danger);"' : ''}>${escapeHtml(p.name)}</td>
           <td class="mono cell-muted">${escapeHtml(p.sku || '-')}</td>
           <td class="cell-muted">${escapeHtml(p.category || '-')}</td>
           <td class="mono">${money(p.price)} <span class="cell-muted">/ ${escapeHtml(p.unit || 'unit')}</span></td>
           <td>${low ? `<span class="badge low blink">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))}</span>` : `${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))}`}</td>
           <td class="cell-muted">${p.reorderPoint ?? 10}</td>
+          <td>${expiryCell}</td>
           <td><div class="row-actions">
             <button class="btn sm ghost" data-action="adjust-stock" data-id="${p.id}" title="Adjust stock"><svg class="icon" data-feather="sliders"></svg></button>
             <button class="btn sm ghost" data-action="stock-history" data-id="${p.id}" title="Stock history"><svg class="icon" data-feather="clock"></svg></button>
@@ -3232,6 +3260,9 @@
       <div class="hint">Flagged as low stock at or below this level.</div>
     </div>
   </div>
+  <div class="field"><label>Expiry date (optional)</label><input id="pf-expiry" type="date" value="${escapeHtml(p.expiryDate || '')}">
+    <div class="hint">Once a month or less from this date, the product is flagged and moved to the top of the list.</div>
+  </div>
   ${p._existing ? `
   <div class="field">
     <label>Current stock</label>
@@ -3245,7 +3276,7 @@
   `;
             }
             function openProductModal(existing) {
-                const draft = existing ? { ...existing, _existing: true } : { id: uid(), name: '', sku: '', category: '', price: 0, unit: 'unit', stock: 0, reorderPoint: 10, description: '' };
+                const draft = existing ? { ...existing, _existing: true } : { id: uid(), name: '', sku: '', category: '', price: 0, unit: 'unit', stock: 0, reorderPoint: 10, expiryDate: '', description: '' };
                 openModal(productFormHtml(draft), {
                     title: existing ? 'Edit product' : 'New product',
                     foot: '<button class="btn ghost" id="modal-cancel">Cancel</button><button class="btn primary" id="modal-save">' + (existing ? 'Save changes' : 'Add product') + '</button>'
@@ -3259,6 +3290,7 @@
                     draft.price = Number(document.getElementById('pf-price').value) || 0;
                     draft.unit = document.getElementById('pf-unit').value.trim() || 'unit';
                     draft.reorderPoint = Number(document.getElementById('pf-reorder').value) || 0;
+                    draft.expiryDate = document.getElementById('pf-expiry').value || '';
                     draft.description = document.getElementById('pf-desc').value.trim();
                     let openingStock = 0;
                     if (!existing) {
@@ -3985,10 +4017,10 @@
             A.exportProductsCsv = exportProductsCsv;
 
             function exportInventoryCsv() {
-                const rows = [['Product', 'SKU', 'Category', 'Unit', 'Stock', 'Reorder point', 'Unit price (GBP)', 'Stock value (GBP)']];
+                const rows = [['Product', 'SKU', 'Category', 'Unit', 'Stock', 'Reorder point', 'Expiry date', 'Unit price (GBP)', 'Stock value (GBP)']];
                 [...state.products].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => {
                     const value = (Number(p.stock) || 0) * (Number(p.price) || 0);
-                    rows.push([p.name, p.sku || '', p.category || '', p.unit || '', p.stock, p.reorderPoint ?? 10, (Number(p.price) || 0).toFixed(2), value.toFixed(2)]);
+                    rows.push([p.name, p.sku || '', p.category || '', p.unit || '', p.stock, p.reorderPoint ?? 10, p.expiryDate || '', (Number(p.price) || 0).toFixed(2), value.toFixed(2)]);
                 });
                 downloadCsv(`inventory-valuation_${todayISO()}.csv`, rows);
                 toast('Inventory valuation CSV downloaded.');
