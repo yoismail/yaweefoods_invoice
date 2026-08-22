@@ -1674,7 +1674,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.5";
+        const APP_BUILD = "2026-08-22.6";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2686,13 +2686,15 @@
                 // Only for the downloaded PDF: give the page a real minimum height and
                 // let a flex spacer push the closing block to the bottom, the way a
                 // properly designed printed document looks. Deliberately a little short
-                // of the true 297mm page (277mm) so small rendering rounding can never
-                // tip it onto an accidental blank second page. Left off the on-screen
-                // preview entirely, forcing a full page height there would look broken
-                // on a phone.
-                const pdfLayout = forPdf ? 'display:flex;flex-direction:column;min-height:277mm;' : '';
+                // Only for the downloaded PDF: an empty spacer div sits right before the
+                // closing block, and buildInvoicePdfBlob measures the actual rendered
+                // content afterward and sets that spacer's height in exact pixels, so
+                // "Received by" and "Thank you" land at the bottom of the page. Not done
+                // with flexbox: html2canvas (the PDF capture library) doesn't reliably
+                // compute flex-grow spacers, so a real measured pixel height is what
+                // actually works. Left off the on-screen preview entirely.
                 return `
-  <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:100%;max-width:210mm;box-sizing:border-box;padding:20px;margin:0 auto;background:#fff;${pdfLayout}">
+  <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:100%;max-width:210mm;box-sizing:border-box;padding:20px;margin:0 auto;background:#fff;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #123B24;padding-bottom:18px;margin-bottom:22px;">
       <div style="display:flex;gap:12px;align-items:center;">
         <img src="data:image/png;base64,${window.YAWEE_LOGO_B64}" style="width:50px;height:50px;object-fit:contain;">
@@ -2770,8 +2772,7 @@
           ${s.paymentReference ? `<div><b style="color:#12140F;">Reference: </b>${escapeHtml(s.paymentReference)}</div>` : ''}
         </div>
       </div>` : ''}
-      ${forPdf ? '<div style="flex:1;"></div>' : ''}
-      <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
+      ${forPdf ? '<div id="pdf-bottom-spacer" style="height:0;"></div>' : ''}
       <div style="margin-top:32px;border-top:1px solid #E3E7DD;padding-top:16px;">
         <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:16px;">Received by</div>
         <div style="display:flex;gap:24px;flex-wrap:wrap;">
@@ -2780,6 +2781,7 @@
           <div style="flex:1;min-width:110px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Date</div></div>
         </div>
       </div>
+      <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
     </div>
   </div>`;
             }
@@ -2887,6 +2889,8 @@
                 iframe.style.height = '1123px';
                 iframe.style.border = '0';
                 iframe.style.zIndex = '99999';
+                iframe.style.opacity = '0';
+                iframe.style.pointerEvents = 'none';
                 iframe.style.background = '#fff';
                 document.body.appendChild(iframe);
 
@@ -2901,9 +2905,23 @@
                 docEl.style.padding = '60px'; // ≈16mm at 96dpi
                 docEl.style.margin = '0';
 
+                // Let the browser lay out the content once with the spacer still at
+                // height 0, then measure it and set the spacer to exactly the pixel
+                // height needed to push "Received by" and "Thank you" down to the
+                // bottom of the page. Not flexbox: html2canvas (the PDF capture
+                // library) doesn't reliably compute flex-grow spacers, a real measured
+                // pixel height is what actually renders correctly.
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                const TARGET_PAGE_PX = 1047; // 277mm at 96dpi — short of the true 297mm page on purpose, a safety margin against rounding tipping this onto an accidental blank second page
+                const spacer = idoc.getElementById('pdf-bottom-spacer');
+                if (spacer) {
+                    const neededSpacer = Math.max(0, TARGET_PAGE_PX - docEl.scrollHeight);
+                    spacer.style.height = neededSpacer + 'px';
+                    await new Promise(r => requestAnimationFrame(r));
+                }
+
                 // Resize the iframe to fit the actual content height, so a longer
                 // invoice (many line items) never gets clipped at a fixed page height.
-                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
                 iframe.style.height = Math.max(1123, docEl.scrollHeight) + 'px';
                 await new Promise(r => requestAnimationFrame(r));
 
