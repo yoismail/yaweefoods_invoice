@@ -1760,7 +1760,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.12";
+        const APP_BUILD = "2026-08-22.13";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -3434,6 +3434,8 @@
                 { id: 'restock', label: 'Restock (new delivery received)' },
                 { id: 'correction', label: 'Stock count correction' },
                 { id: 'damaged', label: 'Damaged / expired / written off' },
+                { id: 'supply_main_store', label: 'Supply Main Store (Colchester)' },
+                { id: 'supply_ipswich_store', label: 'Supply Ipswich Store' },
                 { id: 'other', label: 'Other' },
             ];
             function openAdjustStockModal(product) {
@@ -3458,6 +3460,11 @@
                     foot: '<button class="btn ghost" id="modal-cancel">Cancel</button><button class="btn primary" id="modal-save">Save adjustment</button>'
                 });
                 document.getElementById('modal-cancel').addEventListener('click', closeModal);
+                document.getElementById('as-reason').addEventListener('change', (e) => {
+                    if (e.target.value === 'supply_main_store' || e.target.value === 'supply_ipswich_store') {
+                        document.getElementById('as-direction').value = 'remove';
+                    }
+                });
                 document.getElementById('modal-save').addEventListener('click', async () => {
                     const direction = document.getElementById('as-direction').value;
                     const qty = Number(document.getElementById('as-qty').value) || 0;
@@ -3483,7 +3490,9 @@
             /* ---------------- Stock history (per product) ---------------- */
             const STOCK_REASON_LABELS = {
                 invoice_sold: 'Sold on invoice', invoice_restored: 'Invoice edited/deleted',
-                restock: 'Restock', correction: 'Correction', damaged: 'Damaged/expired', other: 'Other', initial: 'Opening stock'
+                restock: 'Restock', correction: 'Correction', damaged: 'Damaged/expired',
+                supply_main_store: 'Supply Main Store (Colchester)', supply_ipswich_store: 'Supply Ipswich Store',
+                other: 'Other', initial: 'Opening stock'
             };
             function openStockHistoryModal(product) {
                 const movements = state.stockMovements.filter(m => m.productId === product.id).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
