@@ -890,6 +890,7 @@
         .filter-pills {
             display: flex;
             gap: 6px;
+            flex-wrap: wrap;
         }
 
         .pill {
@@ -1073,6 +1074,22 @@
             font-family: 'JetBrains Mono';
             padding: 10px 0;
             font-size: 14px;
+        }
+
+        .kpi-grid.cols-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        @media (max-width:720px) {
+            .kpi-grid.cols-3 {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width:420px) {
+            .kpi-grid.cols-3 {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width:560px) {
@@ -1616,7 +1633,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-21.9";
+        const APP_BUILD = "2026-08-21.10";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2267,7 +2284,7 @@
                 customerById, productById, invoiceById, openModal, closeModal, toast, persist } = A;
 
             const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Cancelled'];
-            const ACTIVITY_VERB = { created: 'created this', updated: 'edited this', deleted: 'deleted this', status_changed: 'changed the status', stock_adjusted: 'adjusted stock' };
+            const ACTIVITY_VERB = { created: 'created this', updated: 'edited this', deleted: 'deleted this', status_changed: 'changed the status', stock_adjusted: 'adjusted stock', reset: 'reset all business data for' };
 
             // Line items don't have a stable id of their own, so they're matched
             // between the before/after versions by product (or by name for a custom
@@ -3073,7 +3090,7 @@
                 const lowCount = lowStockProducts.length;
 
                 return `
-  <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+  <div class="kpi-grid cols-3" style="margin-bottom:20px;">
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="package"></svg> Products</div><div class="val">${state.products.length}</div></div>
     <div class="card kpi-card"><div class="lbl"><span style="font-weight:800;font-size:15px;line-height:1;">£</span> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> At/below reorder point</div><div class="val" style="${lowCount > 0 ? 'color:var(--danger);' : ''}">${lowCount}</div></div>
@@ -3333,7 +3350,7 @@
                     .sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
 
                 return `
-  <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+  <div class="kpi-grid cols-3" style="margin-bottom:20px;">
     <div class="card kpi-card accent"><div class="lbl"><svg class="icon" data-feather="check-circle"></svg> Received</div><div class="val">${money(totalReceived)}</div></div>
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="clock"></svg> Outstanding</div><div class="val">${money(totalOutstanding)}</div></div>
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> Overdue</div><div class="val">${money(totalOverdue)}</div></div>
@@ -4095,9 +4112,19 @@
                 });
                 const btn4 = document.getElementById('reset-data');
                 if (btn4) btn4.addEventListener('click', async () => {
-                    if (!confirm('This will permanently delete all invoices, customers, products, payments and reminders stored in this browser. Continue?')) return;
+                    if (!confirm('This will permanently delete all invoices, customers, products, payments, reminders, stock history and activity history for this business, and restart invoice numbering from 0001. Continue?')) return;
                     state.customers = []; state.products = []; state.invoices = []; state.payments = []; state.reminders = [];
-                    await persist('all');
+                    state.settings.nextInvoiceSeq = 1;
+                    const ok = await persist('all');
+                    // stock_movements and activity_log are append-only logs, never touched
+                    // by persist()'s normal upsert/prune, so they need clearing directly.
+                    if (A.supabase && state.session && state.session.businessId) {
+                        await A.supabase.from('stock_movements').delete().eq('business_id', state.session.businessId);
+                        await A.supabase.from('activity_log').delete().eq('business_id', state.session.businessId);
+                    }
+                    state.stockMovements = [];
+                    state.activityLog = [];
+                    if (ok) await A.logActivity('business', null, s.companyName, 'reset', 'All business data was reset');
                     toast('All business data has been reset.');
                     A.render();
                 });
