@@ -1694,7 +1694,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.7";
+        const APP_BUILD = "2026-08-22.8";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2326,20 +2326,22 @@
           <div class="cell-muted" style="font-size:12.5px;margin-top:2px;">${escapeHtml(r.message)}</div>
         </div>`;
                 }).join('') : `<div class="empty-state"><p>Nothing due. You're all caught up.</p></div>`}
+    </div>
+  </div>
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;">
-        <h3 style="margin:0;font-size:15px;">Stock levels</h3>
-        <a href="#" data-nav="products" style="font-size:12.5px;font-weight:600;color:var(--forest);text-decoration:none;">View all</a>
-      </div>
-      ${stockRows.length ? stockRows.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
-          <span>${escapeHtml(p.name)}</span>
-          ${Number(p.stock) <= (Number(p.reorderPoint) ?? 10)
+  <div class="card card-pad" style="background:var(--leaf-light);border-color:transparent;margin-top:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:15px;">Stock levels</h3>
+      <a href="#" data-nav="products" style="font-size:12.5px;font-weight:600;color:var(--forest);text-decoration:none;">View all</a>
+    </div>
+    ${stockRows.length ? stockRows.map(p => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(18,20,15,.08);font-size:13px;">
+        <span>${escapeHtml(p.name)}</span>
+        ${Number(p.stock) <= (Number(p.reorderPoint) ?? 10)
                         ? `<span class="badge low blink">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))} left</span>`
                         : `<span class="cell-muted mono">${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))}</span>`}
-        </div>
-      `).join('') : `<div class="empty-state" style="padding:20px;"><p>Add products to start tracking stock.</p></div>`}
-    </div>
+      </div>
+    `).join('') : `<div class="empty-state" style="padding:20px;"><p>Add products to start tracking stock.</p></div>`}
   </div>
   `;
             };
