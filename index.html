@@ -1674,7 +1674,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.3";
+        const APP_BUILD = "2026-08-22.4";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2678,13 +2678,21 @@
                A fixed A4-shaped page: header and line items at the top, totals and the
                thank-you note pinned to the very bottom via a flex spacer, the way a
                printed invoice is laid out. ---------------- */
-            function invoicePrintHtml(inv) {
+            function invoicePrintHtml(inv, forPdf) {
                 const c = customerById(inv.customerId);
                 const t = invoiceTotals(inv);
                 const s = state.settings;
                 const paymentsForInvoice = state.payments.filter(p => p.invoiceId === inv.id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                // Only for the downloaded PDF: give the page a real minimum height and
+                // let a flex spacer push the closing block to the bottom, the way a
+                // properly designed printed document looks. Deliberately a little short
+                // of the true 297mm page (277mm) so small rendering rounding can never
+                // tip it onto an accidental blank second page. Left off the on-screen
+                // preview entirely, forcing a full page height there would look broken
+                // on a phone.
+                const pdfLayout = forPdf ? 'display:flex;flex-direction:column;min-height:277mm;' : '';
                 return `
-  <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:100%;max-width:210mm;box-sizing:border-box;padding:20px;margin:0 auto;background:#fff;">
+  <div id="invoice-doc" style="font-family:'Inter',sans-serif;color:#12140F;width:100%;max-width:210mm;box-sizing:border-box;padding:20px;margin:0 auto;background:#fff;${pdfLayout}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #123B24;padding-bottom:18px;margin-bottom:22px;">
       <div style="display:flex;gap:12px;align-items:center;">
         <img src="data:image/png;base64,${window.YAWEE_LOGO_B64}" style="width:50px;height:50px;object-fit:contain;">
@@ -2762,6 +2770,7 @@
           ${s.paymentReference ? `<div><b style="color:#12140F;">Reference: </b>${escapeHtml(s.paymentReference)}</div>` : ''}
         </div>
       </div>` : ''}
+      ${forPdf ? '<div style="flex:1;"></div>' : ''}
       <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
       <div style="margin-top:32px;border-top:1px solid #E3E7DD;padding-top:16px;">
         <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:16px;">Received by</div>
@@ -2885,7 +2894,7 @@
                 idoc.open();
                 idoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box;}</style></head><body></body></html>');
                 idoc.close();
-                idoc.body.innerHTML = invoicePrintHtml(inv);
+                idoc.body.innerHTML = invoicePrintHtml(inv, true);
                 const docEl = idoc.body.firstElementChild;
                 docEl.style.width = PAGE_WIDTH_PX + 'px';
                 docEl.style.maxWidth = 'none';
