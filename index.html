@@ -1616,7 +1616,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-21.8";
+        const APP_BUILD = "2026-08-21.9";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -2274,21 +2274,22 @@
             // item), good enough to catch quantity/price changes and additions/removals.
             function diffInvoiceItems(oldItems, newItems) {
                 const key = it => it.productId || it.name;
+                const label = it => it.name && it.name.trim() ? it.name : '(item with no description)';
                 const oldMap = new Map((oldItems || []).map(it => [key(it), it]));
                 const newMap = new Map((newItems || []).map(it => [key(it), it]));
                 const changes = [];
                 newMap.forEach((newIt, k) => {
                     const oldIt = oldMap.get(k);
                     if (!oldIt) {
-                        changes.push(`Added ${newIt.qty} × ${newIt.name}`);
+                        changes.push(`Added ${newIt.qty} × ${label(newIt)}`);
                     } else if (Number(oldIt.qty) !== Number(newIt.qty)) {
-                        changes.push(`${newIt.name} quantity changed from ${oldIt.qty} to ${newIt.qty}`);
+                        changes.push(`${label(newIt)} quantity changed from ${oldIt.qty} to ${newIt.qty}`);
                     } else if (Number(oldIt.price) !== Number(newIt.price)) {
-                        changes.push(`${newIt.name} price changed from ${money(oldIt.price)} to ${money(newIt.price)}`);
+                        changes.push(`${label(newIt)} price changed from ${money(oldIt.price)} to ${money(newIt.price)}`);
                     }
                 });
                 oldMap.forEach((oldIt, k) => {
-                    if (!newMap.has(k)) changes.push(`Removed ${oldIt.name}`);
+                    if (!newMap.has(k)) changes.push(`Removed ${label(oldIt)}`);
                 });
                 return changes;
             }
@@ -2531,7 +2532,10 @@
                 document.getElementById('modal-save').addEventListener('click', () => {
                     readDraftFromForm(draft);
                     if (!draft.customerId) { toast('Choose a customer before saving.', 'error'); return; }
-                    draft.items = draft.items.filter(it => it.name.trim() !== '' || Number(it.qty) > 0);
+                    // A brand-new row defaults to qty 1 before anyone's touched it — that
+                    // alone shouldn't be enough to let a blank, never-filled-in row onto
+                    // a real invoice. Only a real description counts.
+                    draft.items = draft.items.filter(it => it.name.trim() !== '');
                     if (draft.items.length === 0) { toast('Add at least one line item.', 'error'); return; }
                     onSave(draft);
                 });
