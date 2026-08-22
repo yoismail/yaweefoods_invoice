@@ -1674,7 +1674,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.2";
+        const APP_BUILD = "2026-08-22.3";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -1763,6 +1763,11 @@
                 invoicePrefix: 'YF-',
                 nextInvoiceSeq: 1,
                 managerPhone: '',
+                bankName: '',
+                accountHolder: '',
+                accountNumber: '',
+                sortCode: '',
+                paymentReference: '',
                 users: []
             };
 
@@ -1791,8 +1796,8 @@
                 reminderToDb: r => ({ id: r.id, owner_id: state.session.id, business_id: state.session.businessId, invoice_id: r.invoiceId || null, customer_id: r.customerId || null, message: r.message, due_date: r.dueDate, status: r.status }),
                 reminderFromDb: r => ({ id: r.id, invoiceId: r.invoice_id, customerId: r.customer_id, message: r.message || '', dueDate: r.due_date, status: r.status || 'Pending', createdAt: (r.created_at || '').slice(0, 10) }),
 
-                settingsToDb: s => ({ owner_id: state.session.id, business_id: state.session.businessId, company_name: s.companyName, website: s.website, email: s.email, phone: s.phone, address: s.address, currency: s.currency, tax_rate: s.taxRate, tax_number: s.taxNumber, invoice_prefix: s.invoicePrefix, next_invoice_seq: s.nextInvoiceSeq, manager_phone: s.managerPhone || '' }),
-                settingsFromDb: r => ({ companyName: r.company_name, website: r.website, email: r.email, phone: r.phone, address: r.address, currency: r.currency, taxRate: Number(r.tax_rate) || 0, taxNumber: r.tax_number || '', invoicePrefix: r.invoice_prefix, nextInvoiceSeq: r.next_invoice_seq, managerPhone: r.manager_phone || '', users: [] }),
+                settingsToDb: s => ({ owner_id: state.session.id, business_id: state.session.businessId, company_name: s.companyName, website: s.website, email: s.email, phone: s.phone, address: s.address, currency: s.currency, tax_rate: s.taxRate, tax_number: s.taxNumber, invoice_prefix: s.invoicePrefix, next_invoice_seq: s.nextInvoiceSeq, manager_phone: s.managerPhone || '', bank_name: s.bankName || '', account_holder: s.accountHolder || '', account_number: s.accountNumber || '', sort_code: s.sortCode || '', payment_reference: s.paymentReference || '' }),
+                settingsFromDb: r => ({ companyName: r.company_name, website: r.website, email: r.email, phone: r.phone, address: r.address, currency: r.currency, taxRate: Number(r.tax_rate) || 0, taxNumber: r.tax_number || '', invoicePrefix: r.invoice_prefix, nextInvoiceSeq: r.next_invoice_seq, managerPhone: r.manager_phone || '', bankName: r.bank_name || '', accountHolder: r.account_holder || '', accountNumber: r.account_number || '', sortCode: r.sort_code || '', paymentReference: r.payment_reference || '', users: [] }),
 
                 activityFromDb: r => ({ id: r.id, actorId: r.actor_id, actorName: r.actor_name || 'Someone', entityType: r.entity_type, entityId: r.entity_id, entityLabel: r.entity_label || '', action: r.action, detail: r.detail || '', createdAt: r.created_at }),
             };
@@ -2454,7 +2459,8 @@
                 const currentLine = `${product.stock} ${escapeHtml(A.pluralizeUnit(product.unit || 'unit', product.stock))} in stock`;
                 if (qty <= 0) return currentLine;
                 const remaining = Math.max(0, product.stock - qty);
-                return `${currentLine} · ${remaining} ${escapeHtml(A.pluralizeUnit(product.unit || 'unit', remaining))} left after this invoice`;
+                const remainingText = `${remaining} ${escapeHtml(A.pluralizeUnit(product.unit || 'unit', remaining))} left after this invoice`;
+                return `${currentLine} · <span style="color:var(--danger);font-weight:600;">${remainingText}</span>`;
             }
 
             function invoiceFormHtml(draft) {
@@ -2745,9 +2751,31 @@
         </table>
       </div>` : ''}
       ${inv.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b style="color:#12140F;">Notes: </b>${escapeHtml(inv.notes)}</div>` : ''}
-      <div style="margin-top:20px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
+      ${hasPaymentDetails(s) ? `
+      <div style="margin-top:24px;border-top:1px solid #E3E7DD;padding-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:8px;">Payment details</div>
+        <div style="font-size:12.5px;color:#68705F;line-height:1.8;">
+          ${s.bankName ? `<div><b style="color:#12140F;">Bank: </b>${escapeHtml(s.bankName)}</div>` : ''}
+          ${s.accountHolder ? `<div><b style="color:#12140F;">Account holder: </b>${escapeHtml(s.accountHolder)}</div>` : ''}
+          ${s.accountNumber ? `<div><b style="color:#12140F;">Account number: </b>${escapeHtml(s.accountNumber)}</div>` : ''}
+          ${s.sortCode ? `<div><b style="color:#12140F;">Sort code: </b>${escapeHtml(s.sortCode)}</div>` : ''}
+          ${s.paymentReference ? `<div><b style="color:#12140F;">Reference: </b>${escapeHtml(s.paymentReference)}</div>` : ''}
+        </div>
+      </div>` : ''}
+      <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
+      <div style="margin-top:32px;border-top:1px solid #E3E7DD;padding-top:16px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:16px;">Received by</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:130px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Name</div></div>
+          <div style="flex:1;min-width:130px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Signature</div></div>
+          <div style="flex:1;min-width:110px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Date</div></div>
+        </div>
+      </div>
     </div>
   </div>`;
+            }
+            function hasPaymentDetails(s) {
+                return !!(s.bankName || s.accountHolder || s.accountNumber || s.sortCode || s.paymentReference);
             }
 
             /* ---------------- Invoice view: status control, download, share ---------------- */
@@ -4045,6 +4073,21 @@
     </div>
 
     <div class="card card-pad settings-section">
+      <h3>Payment details</h3>
+      <p class="desc">Shown on every invoice so customers know where to pay. Leave any or all of these blank and the section won't appear on your invoices at all.</p>
+      <div class="row2">
+        <div class="field"><label>Bank name</label><input id="st-bank-name" type="text" value="${escapeHtml(s.bankName || '')}" placeholder="e.g. Barclays"></div>
+        <div class="field"><label>Account holder</label><input id="st-account-holder" type="text" value="${escapeHtml(s.accountHolder || '')}" placeholder="Yawee Foods Limited"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Account number</label><input id="st-account-number" type="text" value="${escapeHtml(s.accountNumber || '')}" placeholder="12345678"></div>
+        <div class="field"><label>Sort code</label><input id="st-sort-code" type="text" value="${escapeHtml(s.sortCode || '')}" placeholder="00-00-00"></div>
+        <div class="field"><label>Payment reference</label><input id="st-payment-ref" type="text" value="${escapeHtml(s.paymentReference || '')}" placeholder="e.g. Your invoice number"></div>
+      </div>
+      <button class="btn primary" id="save-payment-details">Save payment details</button>
+    </div>
+
+    <div class="card card-pad settings-section">
       <h3>Tax &amp; invoicing</h3>
       <p class="desc">Applied to new invoices by default.</p>
       <div class="row2">
@@ -4134,6 +4177,16 @@
                     s.managerPhone = document.getElementById('st-manager-phone').value.trim();
                     await persist('settings');
                     toast('Alert settings saved.');
+                });
+                const btnPayment = document.getElementById('save-payment-details');
+                if (btnPayment) btnPayment.addEventListener('click', async () => {
+                    s.bankName = document.getElementById('st-bank-name').value.trim();
+                    s.accountHolder = document.getElementById('st-account-holder').value.trim();
+                    s.accountNumber = document.getElementById('st-account-number').value.trim();
+                    s.sortCode = document.getElementById('st-sort-code').value.trim();
+                    s.paymentReference = document.getElementById('st-payment-ref').value.trim();
+                    await persist('settings');
+                    toast('Payment details saved.');
                 });
                 const btn3 = document.getElementById('add-user');
                 if (btn3) btn3.addEventListener('click', async () => {
@@ -4618,7 +4671,26 @@
       </table>
     </div>` : ''}
     ${data.notes ? `<div style="margin-top:24px;font-size:12.5px;color:#68705F;border-top:1px solid #E3E7DD;padding-top:14px;"><b>Notes: </b>${escapeHtml(data.notes)}</div>` : ''}
+    ${(c.bank_name || c.account_holder || c.account_number || c.sort_code || c.payment_reference) ? `
+    <div style="margin-top:24px;border-top:1px solid #E3E7DD;padding-top:14px;">
+      <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:8px;">Payment details</div>
+      <div style="font-size:12.5px;color:#68705F;line-height:1.8;">
+        ${c.bank_name ? `<div><b style="color:#12140F;">Bank: </b>${escapeHtml(c.bank_name)}</div>` : ''}
+        ${c.account_holder ? `<div><b style="color:#12140F;">Account holder: </b>${escapeHtml(c.account_holder)}</div>` : ''}
+        ${c.account_number ? `<div><b style="color:#12140F;">Account number: </b>${escapeHtml(c.account_number)}</div>` : ''}
+        ${c.sort_code ? `<div><b style="color:#12140F;">Sort code: </b>${escapeHtml(c.sort_code)}</div>` : ''}
+        ${c.payment_reference ? `<div><b style="color:#12140F;">Reference: </b>${escapeHtml(c.payment_reference)}</div>` : ''}
+      </div>
+    </div>` : ''}
     <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(c.name || '')}.</div>
+    <div style="margin-top:32px;border-top:1px solid #E3E7DD;padding-top:16px;">
+      <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:16px;">Received by</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:130px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Name</div></div>
+        <div style="flex:1;min-width:130px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Signature</div></div>
+        <div style="flex:1;min-width:110px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Date</div></div>
+      </div>
+    </div>
   `;
             }
 
