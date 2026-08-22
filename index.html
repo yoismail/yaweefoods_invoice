@@ -450,11 +450,62 @@
             z-index: 1;
         }
 
+        .login-stat {
+            cursor: default;
+            padding: 8px 12px;
+            margin: -8px -12px;
+            border-radius: 10px;
+            transition: background .2s ease, transform .2s ease;
+        }
+
+        .login-stat:hover {
+            background: rgba(255, 255, 255, .08);
+            transform: translateY(-3px);
+        }
+
+        .login-stat:hover b {
+            color: #fff;
+        }
+
         .login-brand-stats div b {
             display: block;
             font-family: 'Space Grotesk';
             font-size: 22px;
-            transition: opacity .35s ease;
+            transition: opacity .35s ease, color .2s ease;
+            animation: statBounce 5.4s ease-in-out infinite;
+        }
+
+        .login-brand-stats div:nth-child(1) b {
+            animation-delay: 0s;
+        }
+
+        .login-brand-stats div:nth-child(2) b {
+            animation-delay: 1.8s;
+        }
+
+        .login-brand-stats div:nth-child(3) b {
+            animation-delay: 3.6s;
+        }
+
+        @keyframes statBounce {
+
+            0%,
+            90%,
+            100% {
+                transform: translateY(0);
+            }
+
+            93% {
+                transform: translateY(-7px);
+            }
+
+            96% {
+                transform: translateY(0);
+            }
+
+            98% {
+                transform: translateY(-3px);
+            }
         }
 
         .login-brand-stats div span {
@@ -1566,9 +1617,9 @@
                 <p>Invoices, customers, products, payments and reminders for Yawee Foods, kept in sync so nothing falls
                     through the cracks.</p>
                 <div class="login-brand-stats">
-                    <div><b id="stat-customers">–</b><span>Customers</span></div>
-                    <div><b id="stat-invoices">–</b><span>Invoices raised</span></div>
-                    <div><b id="stat-products">–</b><span>Products listed</span></div>
+                    <div class="login-stat"><b id="stat-customers">-</b><span>Customers</span></div>
+                    <div class="login-stat"><b id="stat-invoices">-</b><span>Invoices raised</span></div>
+                    <div class="login-stat"><b id="stat-products">-</b><span>Products listed</span></div>
                 </div>
             </div>
             <div class="login-brand-foot">© <span id="login-year"></span> Yawee Foods Limited</div>
@@ -1709,7 +1760,7 @@
         // Settings > Preferences after deploying to confirm the live site is
         // actually running this version and not a cached older copy.
         // ---------------------------------------------------------
-        const APP_BUILD = "2026-08-22.11";
+        const APP_BUILD = "2026-08-22.12";
         console.log('Yawee Foods Business Manager, build ' + APP_BUILD);
 
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
@@ -4513,18 +4564,25 @@
                         return;
                     }
                     if (data) {
-                        const setText = (id, val) => {
+                        const animateCount = (id, target) => {
                             const el = document.getElementById(id);
                             if (!el) return;
-                            el.style.opacity = '0';
-                            requestAnimationFrame(() => {
-                                el.textContent = val ?? 0;
-                                el.style.opacity = '1';
-                            });
+                            const finalVal = Number(target) || 0;
+                            const duration = 900;
+                            const start = performance.now();
+                            el.style.opacity = '1';
+                            function tick(now) {
+                                const t = Math.min(1, (now - start) / duration);
+                                const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic, quick start then settles in
+                                el.textContent = Math.round(finalVal * eased);
+                                if (t < 1) requestAnimationFrame(tick);
+                                else el.textContent = finalVal;
+                            }
+                            requestAnimationFrame(tick);
                         };
-                        setText('stat-customers', data.customers ?? 0);
-                        setText('stat-invoices', data.invoices ?? 0);
-                        setText('stat-products', data.products ?? 0);
+                        animateCount('stat-customers', data.customers ?? 0);
+                        animateCount('stat-invoices', data.invoices ?? 0);
+                        animateCount('stat-products', data.products ?? 0);
                     }
                 } catch (e) { /* login page still works fine without these numbers */ }
             }
