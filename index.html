@@ -2792,6 +2792,7 @@
           <div style="font-weight:700;font-size:17px;">${escapeHtml(s.companyName)}</div>
           <div style="font-size:12px;color:#68705F;">${escapeHtml(s.address)}</div>
           <div style="font-size:12px;color:#68705F;">${escapeHtml(s.email)} · ${escapeHtml(s.phone)}</div>
+          ${s.website ? `<div style="font-size:12px;color:#68705F;">${escapeHtml(s.website)}</div>` : ''}
         </div>
       </div>
       <div style="text-align:right;">
@@ -2871,7 +2872,7 @@
           <div style="flex:1;min-width:110px;"><div style="border-bottom:1px solid #12140F;height:26px;"></div><div style="margin-top:5px;font-size:11px;color:#8A9080;">Date</div></div>
         </div>
       </div>
-      <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(s.companyName)}.</div>
+      <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">${escapeHtml(s.companyName)} — we are your number one importer and distributor of African foodstuffs and drinks.<br>Thank you for your patronage.</div>
     </div>
   </div>`;
             }
@@ -4794,6 +4795,7 @@
         <div style="font-weight:700;font-size:17px;">${escapeHtml(c.name || '')}</div>
         <div style="font-size:12px;color:#68705F;">${escapeHtml(c.address || '')}</div>
         <div style="font-size:12px;color:#68705F;">${escapeHtml(c.email || '')} · ${escapeHtml(c.phone || '')}</div>
+        ${c.website ? `<div style="font-size:12px;color:#68705F;">${escapeHtml(c.website)}</div>` : ''}
       </div>
       <div style="text-align:right;">
         <div style="font-size:20px;font-weight:700;color:#123B24;">INVOICE</div>
@@ -4854,7 +4856,7 @@
         ${c.payment_reference ? `<div><b style="color:#12140F;">Reference: </b>${escapeHtml(c.payment_reference)}</div>` : ''}
       </div>
     </div>` : ''}
-    <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">Thank you for your business with ${escapeHtml(c.name || '')}.</div>
+    <div style="margin-top:24px;font-size:11.5px;color:#8A9080;text-align:center;">${escapeHtml(c.name || '')} — we are your number one importer and distributor of African foodstuffs and drinks.<br>Thank you for your patronage.</div>
     <div style="margin-top:32px;border-top:1px solid #E3E7DD;padding-top:16px;">
       <div style="font-size:11px;text-transform:uppercase;color:#8A9080;font-weight:700;margin-bottom:16px;">Received by</div>
       <div style="display:flex;gap:24px;flex-wrap:wrap;">
