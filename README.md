@@ -1,4 +1,4 @@
-# Yo7 Solution: Invoicing & Business Manager
+# Yo7 Solutions: Invoicing & Business Manager
 
 ![Status](https://img.shields.io/badge/status-active-2FAE60?style=flat-square)
 ![Type](https://img.shields.io/badge/type-single--page%20app-123B24?style=flat-square)
@@ -8,7 +8,7 @@
 
 A single-file, multi-tenant invoicing and business management app. Every business that signs up gets its own customers, invoices, stock and settings, isolated from every other business on the same deployment, and can make the app its own from Settings: upload a logo, set a company name, address and contact details, and an optional invoice footer message, all of which appear automatically on every invoice that business raises. It handles the day-to-day of running a small business: raising invoices, tracking stock, recording payments, following up on customers, and reporting on revenue, shared across everyone on a team, with every action attributed to whoever did it.
 
-> Originally built as a real production tool for one wholesale distributor, then generalised into Yo7 Solution: a product other businesses can sign up to and brand as their own.
+> Originally built as a real production tool for one wholesale distributor, then generalised into Yo7 Solutions: a product other businesses can sign up to and brand as their own.
 
 ---
 
@@ -193,4 +193,4 @@ MIT, see [LICENSE](./LICENSE) for details. Adjust as appropriate before publishi
 
 ---
 
-<p align="center">Yo7 Solution — your brand, your invoices, our platform.</p>
+<p align="center">Yo7 Solutions — your brand, your invoices, our platform.</p>
