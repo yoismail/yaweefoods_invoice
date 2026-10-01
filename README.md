@@ -1,4 +1,4 @@
-# Yo7: Wholesale Business Manager
+# Yo7 Solution: Invoicing & Business Manager
 
 ![Status](https://img.shields.io/badge/status-active-2FAE60?style=flat-square)
 ![Type](https://img.shields.io/badge/type-single--page%20app-123B24?style=flat-square)
@@ -6,9 +6,9 @@
 ![Backend](https://img.shields.io/badge/backend-Supabase-3ECF8E?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
 
-A single-file invoicing and business management app built for **Yo7 Foods Limited**, a wholesale African and Caribbean grocery distributor based in Colchester, Essex. It handles the day-to-day of running the business: raising invoices, tracking stock, recording payments, following up on customers, and reporting on revenue, shared across everyone on the team, with every action attributed to whoever did it.
+A single-file, multi-tenant invoicing and business management app. Every business that signs up gets its own customers, invoices, stock and settings, isolated from every other business on the same deployment, and can make the app its own from Settings: upload a logo, set a company name, address and contact details, and an optional invoice footer message, all of which appear automatically on every invoice that business raises. It handles the day-to-day of running a small business: raising invoices, tracking stock, recording payments, following up on customers, and reporting on revenue, shared across everyone on a team, with every action attributed to whoever did it.
 
-> Built as a real production tool for the business, and as a portfolio piece demonstrating a full client-side app backed by a properly secured, multi-user Postgres database.
+> Originally built as a real production tool for one wholesale distributor, then generalised into Yo7 Solution: a product other businesses can sign up to and brand as their own.
 
 ---
 
@@ -27,6 +27,12 @@ A single-file invoicing and business management app built for **Yo7 Foods Limite
 ---
 
 ## Features
+
+**Branding**
+- Upload a logo from Settings (PNG, JPG, SVG or WebP), resized client-side so it never bloats the database, and shown wherever your business appears: the sidebar, every invoice, and the public invoice tracking page
+- Company name, address, website, email and phone all flow straight through to invoices, no separate "invoice settings" to keep in sync
+- An optional custom invoice footer message, shown in place of the default thank-you line
+- No logo yet? A neutral initials badge in your business's place keeps things looking intentional rather than showing a placeholder
 
 **Invoicing**
 - Create, edit, and delete invoices with multiple line items, laid out as a card per item rather than a cramped table, so it works cleanly on a phone
@@ -74,7 +80,7 @@ A single-file invoicing and business management app built for **Yo7 Foods Limite
 | Backend | [Supabase](https://supabase.com): Postgres database, Auth, Row Level Security, and RPC functions |
 | PDF generation | [html2pdf.js](https://github.com/eKoopmans/html2pdf.js), loaded on demand only when a PDF is actually requested, not on every page visit |
 | Icons | [Feather Icons](https://feathericons.com) |
-| Fonts | Space Grotesk, Inter, and JetBrains Mono via Google Fonts |
+| Fonts | Montserrat Alternates and JetBrains Mono via Google Fonts |
 | Hosting | Any static host, deployed on GitHub Pages |
 
 No build step, no bundler, no `node_modules`. Everything the browser needs is either inlined or loaded from a CDN.
@@ -128,6 +134,12 @@ The app is entirely client-driven. There is no custom backend server: Supabase's
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com), the free tier is sufficient to start.
 2. **Run the schema**: open the SQL Editor in your Supabase project and run the full contents of [`schema.sql`](./schema.sql). It's written to be safe to re-run any number of times.
+   - **Upgrading an existing deployment?** The branding feature needs two new columns on `settings`. Run this once:
+     ```sql
+     ALTER TABLE settings ADD COLUMN IF NOT EXISTS logo_data_url text;
+     ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_footer_message text;
+     ```
+     If `get_invoice_public` is a Postgres function returning a fixed set of columns (rather than `select *`), also add `logo_data_url` and `invoice_footer_message` to the `company` object it returns, so the public tracking page can show them too.
 3. **Get your project keys**: in Supabase, go to Settings, then API, and copy your Project URL and Publishable (anon) key.
 4. **Configure the app**: open `index.html` and paste your keys in at the top:
    ```js
@@ -181,4 +193,4 @@ MIT, see [LICENSE](./LICENSE) for details. Adjust as appropriate before publishi
 
 ---
 
-<p align="center">Built for Yawee Foods Limited, Colchester.</p>
+<p align="center">Yo7 Solution — your brand, your invoices, our platform.</p>
