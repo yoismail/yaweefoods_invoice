@@ -133,13 +133,14 @@ The app is entirely client-driven. There is no custom backend server: Supabase's
 ## Getting started
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com), the free tier is sufficient to start.
-2. **Run the schema**: open the SQL Editor in your Supabase project and run the full contents of [`schema.sql`](./schema.sql). It's written to be safe to re-run any number of times. Note: this file currently only covers the `get_invoice_public` RPC function, not the full table/RLS schema — see the note at the top of the file.
+2. **Run the schema**: open the SQL Editor in your Supabase project and run the full contents of [`schema.sql`](./schema.sql). It's written to be safe to re-run any number of times. Note: this file currently only covers the `get_invoice_public` RPC function and the `invoice_items.tax_rate` column, not the full table/RLS schema — see the note at the top of the file.
    - **Upgrading an existing deployment?** The branding feature needs two new columns on `settings`, plus the public tracking page's RPC function needs to actually return them. Run this once:
      ```sql
      ALTER TABLE settings ADD COLUMN IF NOT EXISTS logo_data_url text;
      ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_footer_message text;
      ```
      Then re-run the `get_invoice_public` function from [`schema.sql`](./schema.sql) — it's a `CREATE OR REPLACE`, so running it updates the existing function in place. Without this step, the public tracking link keeps showing the generated initials badge and default thank-you message instead of your uploaded logo and footer message, even after you've saved them in Settings, since the function was never including those two columns in what it returns.
+   - **Per-line-item tax**: invoices now set a tax rate on each line item instead of one rate for the whole invoice. Run the `ALTER TABLE invoice_items` statement and the updated `get_invoice_public` function from [`schema.sql`](./schema.sql). The `sync_invoice_items` function (not yet in this file — see its note) also needs a matching update to persist each item's rate; until both are applied, per-item tax still works correctly within a session but resets to the invoice's old overall rate the next time an invoice is reloaded.
 3. **Get your project keys**: in Supabase, go to Settings, then API, and copy your Project URL and Publishable (anon) key.
 4. **Configure the app**: open `index.html` and paste your keys in at the top:
    ```js

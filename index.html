@@ -1444,7 +1444,7 @@
 
         .item-card-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
             gap: 8px;
             align-items: end;
         }
@@ -1485,6 +1485,14 @@
             .item-card-grid {
                 grid-template-columns: 1fr 1fr;
             }
+        }
+
+        .inline-new-customer {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            background: var(--tint);
+            border: 1px solid var(--line);
         }
 
         .totals-box {
@@ -2229,7 +2237,11 @@
                     id: r.id, number: r.number, customerId: r.customer_id, issueDate: r.issue_date, dueDate: r.due_date,
                     taxRate: Number(r.tax_rate) || 0, deliveryFee: Number(r.delivery_fee) || 0, notes: r.notes || '', status: r.status, createdAt: (r.created_at || '').slice(0, 10),
                     trackingToken: r.tracking_token, viewedAt: r.viewed_at,
-                    items: (r.invoice_items || []).map(it => ({ productId: it.product_id || '', name: it.name, qty: Number(it.qty) || 0, price: Number(it.price) || 0, unit: it.unit || '' }))
+                    // taxRate stays undefined (not 0) when the column doesn't exist yet or
+                    // was never set, so invoiceTotals' per-item fallback to the invoice's
+                    // old overall tax_rate still kicks in for invoices saved before
+                    // per-item tax existed, instead of silently reading as 0% tax.
+                    items: (r.invoice_items || []).map(it => ({ productId: it.product_id || '', name: it.name, qty: Number(it.qty) || 0, price: Number(it.price) || 0, unit: it.unit || '', taxRate: it.tax_rate == null ? undefined : Number(it.tax_rate) }))
                 }),
 
                 paymentToDb: p => ({ id: p.id, owner_id: state.session.id, business_id: state.session.businessId, invoice_id: p.invoiceId, amount: p.amount, date: p.date, method: p.method, note: p.note || '' }),
@@ -2364,7 +2376,11 @@
                         const inv = state.invoices.find(i => i.id === id);
                         if (!inv) continue; // no longer exists locally, its items were already removed via the cascading delete above
                         const itemsPayload = inv.items.map(it => ({
-                            product_id: it.productId || '', name: it.name, qty: it.qty, price: it.price, unit: it.unit || ''
+                            product_id: it.productId || '', name: it.name, qty: it.qty, price: it.price, unit: it.unit || '',
+                            // Resolve to the item's own rate, falling back to the invoice's old
+                            // overall rate, so saving backfills a real per-item value instead of
+                            // leaving it ambiguous for next time this invoice is loaded.
+                            tax_rate: it.taxRate ?? inv.taxRate ?? 0
                         }));
                         const { error } = await supabase.rpc('sync_invoice_items', { p_invoice_id: inv.id, p_items: itemsPayload });
                         check('save items for invoice ' + inv.number, error);
@@ -2462,7 +2478,14 @@
             function invoiceTotals(inv) {
                 const subtotal = inv.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
                 const deliveryFee = Number(inv.deliveryFee) || 0;
-                const tax = (subtotal + deliveryFee) * (Number(inv.taxRate) || 0) / 100;
+                // Tax is set per line item (fallback to the invoice's old overall rate for
+                // items saved before per-item tax existed), not one flat rate on the whole
+                // invoice, so a tax-exempt item can sit on the same invoice as a taxed one.
+                const tax = inv.items.reduce((s, it) => {
+                    const amt = (Number(it.qty) || 0) * (Number(it.price) || 0);
+                    const rate = Number(it.taxRate ?? inv.taxRate ?? 0);
+                    return s + amt * rate / 100;
+                }, 0);
                 const total = subtotal + deliveryFee + tax;
                 const paid = state.payments.filter(p => p.invoiceId === inv.id).reduce((s, p) => s + Number(p.amount || 0), 0);
                 const balance = Math.max(0, total - paid);
@@ -2854,6 +2877,8 @@
                         changes.push(`${label(newIt)} quantity changed from ${oldIt.qty} to ${newIt.qty}`);
                     } else if (Number(oldIt.price) !== Number(newIt.price)) {
                         changes.push(`${label(newIt)} price changed from ${money(oldIt.price)} to ${money(newIt.price)}`);
+                    } else if (Number(oldIt.taxRate || 0) !== Number(newIt.taxRate || 0)) {
+                        changes.push(`${label(newIt)} tax rate changed from ${oldIt.taxRate || 0}% to ${newIt.taxRate || 0}%`);
                     }
                 });
                 oldMap.forEach((oldIt, k) => {
@@ -2867,7 +2892,6 @@
                     { key: 'issueDate', label: 'Issue date', format: v => fmtDate(v) },
                     { key: 'dueDate', label: 'Due date', format: v => fmtDate(v) },
                     { key: 'deliveryFee', label: 'Delivery fee', format: v => money(v || 0) },
-                    { key: 'taxRate', label: 'Tax rate', format: v => (v || 0) + '%' },
                     { key: 'notes', label: 'Notes', format: v => v || '(none)' },
                 ]);
                 return A.summarizeChanges([...fieldChanges, ...diffInvoiceItems(oldInv.items, newInv.items)]);
@@ -2936,11 +2960,12 @@
             };
 
             /* ---------------- Invoice form (create/edit) ---------------- */
-            function lineItemRow(item, idx) {
+            function lineItemRow(item, idx, fallbackTaxRate) {
                 const options = state.products.map(p => `<option value="${p.id}" ${item.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}, ${p.stock} ${escapeHtml(A.pluralizeUnit(p.unit || 'unit', p.stock))} in stock</option>`).join('');
                 const amt = (Number(item.qty) || 0) * (Number(item.price) || 0);
                 const linkedProduct = item.productId ? productById(item.productId) : null;
                 const stockHint = linkedProduct ? `<div class="cell-muted stock-hint" style="font-size:11px;margin:-4px 0 10px;">${stockHintText(linkedProduct, item.qty)}</div>` : '';
+                const taxRate = item.taxRate ?? fallbackTaxRate ?? 0;
                 return `<div class="item-card" data-row="${idx}">
     <div class="item-card-head">
       <select class="item-product" data-idx="${idx}">
@@ -2955,6 +2980,7 @@
       <div><label>Qty</label><input class="item-qty" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></div>
       <div><label>Unit</label><input class="item-unit" data-idx="${idx}" type="text" value="${escapeHtml(item.unit || '')}" placeholder="unit" ${linkedProduct ? 'readonly' : ''}></div>
       <div><label>Unit price (${A.currencySymbol()})</label><input class="item-price" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></div>
+      <div><label>Tax %</label><input class="item-tax" data-idx="${idx}" type="number" min="0" step="0.1" value="${taxRate}"></div>
       <div><label>Amount</label><div class="amt-box">${money(amt)}</div></div>
     </div>
   </div>`;
@@ -2970,15 +2996,28 @@
 
             function invoiceFormHtml(draft) {
                 const custOptions = state.customers.map(c => `<option value="${c.id}" ${draft.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+                const addingCustomer = !!draft._newCustomer;
+                const nc = draft._newCustomer || {};
                 return `
   <div class="row3">
     <div class="field"><label>Customer</label>
-      <select id="f-customer">${state.customers.length ? '<option value="">Select a customer</option>' + custOptions : '<option value="">No customers yet, add one first</option>'}</select>
+      <select id="f-customer">
+        ${state.customers.length ? '<option value="">Select a customer</option>' + custOptions : '<option value="">No customers yet</option>'}
+        <option value="__new__" ${addingCustomer ? 'selected' : ''}>+ Add new customer</option>
+      </select>
     </div>
     <div class="field"><label>Invoice number</label><input id="f-number" type="text" value="${escapeHtml(draft.number)}" ${draft._existing ? '' : 'readonly'}></div>
     <div class="field"><label>Status</label>
       <select id="f-status">${INVOICE_STATUSES.map(s => `<option value="${s}" ${draft.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
     </div>
+  </div>
+  <div id="new-customer-row" class="inline-new-customer" style="${addingCustomer ? '' : 'display:none;'}">
+    <div class="row3">
+      <div class="field"><label>Business / contact name</label><input id="nc-name" type="text" value="${escapeHtml(nc.name || '')}" placeholder="e.g. Riverside Supplies Ltd"></div>
+      <div class="field"><label>Email</label><input id="nc-email" type="email" value="${escapeHtml(nc.email || '')}" placeholder="orders@example.com"></div>
+      <div class="field"><label>Phone</label><input id="nc-phone" type="text" value="${escapeHtml(nc.phone || '')}" placeholder="01234 567890"></div>
+    </div>
+    <div class="hint" style="margin-top:-4px;">Saved as a new customer when you create this invoice. Add their address or notes afterwards from the Customers page.</div>
   </div>
   <div class="row2">
     <div class="field"><label>Issue date</label><input id="f-issue" type="date" value="${draft.issueDate}"></div>
@@ -2987,13 +3026,12 @@
 
   <label style="display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:6px 0 8px;">Line items</label>
   <div id="items-body">
-    ${draft.items.map((it, idx) => lineItemRow(it, idx)).join('')}
+    ${draft.items.map((it, idx) => lineItemRow(it, idx, draft.taxRate)).join('')}
   </div>
   <button type="button" class="btn sm ghost" id="add-item"><svg class="icon" data-feather="plus"></svg> Add line item</button>
 
   <div class="totals-box">
     <div class="field" style="margin:14px 0 6px;"><label>Delivery fee (${A.currencySymbol()})</label><input id="f-delivery" type="number" min="0" step="0.01" value="${draft.deliveryFee || 0}"></div>
-    <div class="field" style="margin:0 0 6px;"><label>Tax rate (%)</label><input id="f-taxrate" type="number" min="0" step="0.1" value="${draft.taxRate}"></div>
     <div class="tline"><span>Subtotal</span><span id="calc-subtotal" class="mono"></span></div>
     <div class="tline"><span>Delivery</span><span id="calc-delivery" class="mono"></span></div>
     <div class="tline"><span>Tax</span><span id="calc-tax" class="mono"></span></div>
@@ -3006,12 +3044,20 @@
 
             function readDraftFromForm(draft) {
                 draft.customerId = document.getElementById('f-customer').value;
+                if (draft.customerId === '__new__') {
+                    draft._newCustomer = {
+                        name: document.getElementById('nc-name').value.trim(),
+                        email: document.getElementById('nc-email').value.trim(),
+                        phone: document.getElementById('nc-phone').value.trim(),
+                    };
+                } else {
+                    draft._newCustomer = null;
+                }
                 draft.number = document.getElementById('f-number').value.trim();
                 draft.status = document.getElementById('f-status').value;
                 draft.issueDate = document.getElementById('f-issue').value;
                 draft.dueDate = document.getElementById('f-due').value;
                 draft.deliveryFee = Number(document.getElementById('f-delivery').value) || 0;
-                draft.taxRate = Number(document.getElementById('f-taxrate').value) || 0;
                 draft.notes = document.getElementById('f-notes').value;
                 return draft;
             }
@@ -3019,7 +3065,11 @@
             function recalcTotals(draft) {
                 const subtotal = draft.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
                 const deliveryFee = Number(draft.deliveryFee) || 0;
-                const tax = (subtotal + deliveryFee) * (Number(draft.taxRate) || 0) / 100;
+                const tax = draft.items.reduce((s, it) => {
+                    const amt = (Number(it.qty) || 0) * (Number(it.price) || 0);
+                    const rate = Number(it.taxRate ?? draft.taxRate ?? 0);
+                    return s + amt * rate / 100;
+                }, 0);
                 const total = subtotal + deliveryFee + tax;
                 const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
                 set('calc-subtotal', money(subtotal));
@@ -3029,8 +3079,18 @@
             }
 
             function wireInvoiceForm(draft, onSave) {
-                document.getElementById('f-taxrate').addEventListener('input', (e) => { draft.taxRate = Number(e.target.value) || 0; recalcTotals(draft); });
                 document.getElementById('f-delivery').addEventListener('input', (e) => { draft.deliveryFee = Number(e.target.value) || 0; recalcTotals(draft); });
+                document.getElementById('f-customer').addEventListener('change', (e) => {
+                    const row = document.getElementById('new-customer-row');
+                    if (e.target.value === '__new__') {
+                        draft._newCustomer = draft._newCustomer || { name: '', email: '', phone: '' };
+                        row.style.display = '';
+                        document.getElementById('nc-name').focus();
+                    } else {
+                        draft._newCustomer = null;
+                        row.style.display = 'none';
+                    }
+                });
 
                 function rebindItemRows() {
                     document.querySelectorAll('.item-product').forEach(sel => {
@@ -3061,6 +3121,9 @@
                     document.querySelectorAll('.item-price').forEach(inp => {
                         inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].price = Number(inp.value) || 0; refreshRowAmount(Number(inp.dataset.idx)); recalcTotals(draft); });
                     });
+                    document.querySelectorAll('.item-tax').forEach(inp => {
+                        inp.addEventListener('input', () => { draft.items[Number(inp.dataset.idx)].taxRate = Number(inp.value) || 0; recalcTotals(draft); });
+                    });
                     document.querySelectorAll('.item-remove').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const idx = Number(btn.dataset.idx);
@@ -3085,7 +3148,7 @@
                     row.querySelector('.amt-box').textContent = money((Number(it.qty) || 0) * (Number(it.price) || 0));
                 }
                 function refreshItemsTable() {
-                    document.getElementById('items-body').innerHTML = draft.items.map((it, idx) => lineItemRow(it, idx)).join('');
+                    document.getElementById('items-body').innerHTML = draft.items.map((it, idx) => lineItemRow(it, idx, draft.taxRate)).join('');
                     rebindItemRows();
                     if (window.feather) feather.replace();
                 }
@@ -3093,14 +3156,18 @@
                 recalcTotals(draft);
 
                 document.getElementById('add-item').addEventListener('click', () => {
-                    draft.items.push({ productId: '', name: '', qty: 1, price: 0, unit: '' });
+                    draft.items.push({ productId: '', name: '', qty: 1, price: 0, unit: '', taxRate: state.settings.taxRate || 0 });
                     refreshItemsTable();
                     recalcTotals(draft);
                 });
 
                 document.getElementById('modal-save').addEventListener('click', () => {
                     readDraftFromForm(draft);
-                    if (!draft.customerId) { toast('Choose a customer before saving.', 'error'); return; }
+                    if (draft.customerId === '__new__') {
+                        if (!draft._newCustomer || !draft._newCustomer.name) { toast("Enter the new customer's name.", 'error'); return; }
+                    } else if (!draft.customerId) {
+                        toast('Choose a customer before saving.', 'error'); return;
+                    }
                     // A brand-new row defaults to qty 1 before anyone's touched it — that
                     // alone shouldn't be enough to let a blank, never-filled-in row onto
                     // a real invoice. Only a real description counts.
@@ -3118,7 +3185,7 @@
             function openInvoiceModal(existing) {
                 const draft = existing
                     ? JSON.parse(JSON.stringify(existing))
-                    : { id: uid(), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0, unit: '' }], deliveryFee: 0, taxRate: state.settings.taxRate || 20, notes: '', status: 'Draft', createdAt: todayISO() };
+                    : { id: uid(), number: nextInvoiceNumber(), customerId: state.customers[0] ? state.customers[0].id : '', issueDate: todayISO(), dueDate: addDays(todayISO(), 14), items: [{ productId: '', name: '', qty: 1, price: 0, unit: '', taxRate: state.settings.taxRate || 0 }], deliveryFee: 0, taxRate: state.settings.taxRate || 0, notes: '', status: 'Draft', createdAt: todayISO() };
                 draft._existing = !!existing;
 
                 openModal(invoiceFormHtml(draft), {
@@ -3131,6 +3198,23 @@
 
                 wireInvoiceForm(draft, async (finalDraft) => {
                     const oldItems = existing ? existing.items : [];
+
+                    // Picking "+ Add new customer" rather than an existing one, the same
+                    // way a custom line item becomes a real product, becomes a real
+                    // customer automatically, so it's there to add an address or notes to
+                    // on the Customers page afterwards.
+                    if (finalDraft.customerId === '__new__' && finalDraft._newCustomer) {
+                        const nc = finalDraft._newCustomer;
+                        const newCustomer = {
+                            id: uid(), name: nc.name.trim(), email: nc.email || '', phone: nc.phone || '',
+                            address: '', notes: '', createdAt: todayISO()
+                        };
+                        state.customers.push(newCustomer);
+                        await persist('customers');
+                        await A.logActivity('customer', newCustomer.id, newCustomer.name, 'created', `Added automatically from invoice ${finalDraft.number}`);
+                        finalDraft.customerId = newCustomer.id;
+                    }
+                    delete finalDraft._newCustomer;
 
                     // A custom line item (typed in rather than picked from the catalogue)
                     // becomes a real product automatically, so it's there to edit, add a
@@ -3235,6 +3319,7 @@
         <th style="text-align:left;padding:8px 4px;font-size:11px;color:#7A6D65;text-transform:uppercase;">Description</th>
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;text-transform:uppercase;">Qty</th>
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;text-transform:uppercase;">Unit price</th>
+        ${t.tax > 0 ? `<th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;text-transform:uppercase;">Tax</th>` : ''}
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;text-transform:uppercase;">Amount</th>
       </tr></thead>
       <tbody>
@@ -3242,6 +3327,7 @@
           <td style="padding:9px 4px;">${escapeHtml(it.name)}</td>
           <td style="padding:9px 4px;text-align:right;">${it.qty}${it.unit ? ' ' + escapeHtml(A.pluralizeUnit(it.unit, it.qty)) : ''}</td>
           <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price)}</td>
+          ${t.tax > 0 ? `<td style="padding:9px 4px;text-align:right;font-family:monospace;">${Number(it.taxRate ?? inv.taxRate ?? 0)}%</td>` : ''}
           <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price)}</td>
         </tr>`).join('')}
       </tbody>
@@ -3251,7 +3337,7 @@
       <div style="margin-left:auto;width:260px;max-width:100%;">
         <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(t.subtotal)}</span></div>
         ${t.deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(t.deliveryFee)}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax (${inv.taxRate}%)</span><span style="font-family:monospace;">${money(t.tax)}</span></div>
+        ${t.tax > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax</span><span style="font-family:monospace;">${money(t.tax)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #063B00;margin-top:4px;font-weight:700;font-size:16px;"><span>Total due</span><span style="font-family:monospace;">${money(t.total)}</span></div>
         ${t.paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;"><span>Balance</span><span style="font-family:monospace;">${money(t.balance)}</span></div>` : ''}
       </div>
@@ -4682,7 +4768,9 @@
       <h3><span class="icon-badge ib-violet"><svg class="icon" data-feather="percent"></svg></span> Tax &amp; invoicing</h3>
       <p class="desc">Applied to new invoices by default.</p>
       <div class="row2">
-        <div class="field"><label>Default tax rate (%)</label><input id="st-taxrate" type="number" min="0" step="0.1" value="${s.taxRate}"></div>
+        <div class="field"><label>Default tax rate (%)</label><input id="st-taxrate" type="number" min="0" step="0.1" value="${s.taxRate}">
+          <div class="hint">Starting tax rate for each new invoice line item — adjust it per line on the invoice for tax-exempt or differently-taxed products.</div>
+        </div>
         <div class="field"><label>Tax / VAT number</label><input id="st-taxnum" type="text" value="${escapeHtml(s.taxNumber)}" placeholder="Optional"></div>
       </div>
       <div class="row2">
@@ -5301,7 +5389,11 @@
                 const items = data.items || [];
                 const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
                 const deliveryFee = Number(data.delivery_fee) || 0;
-                const tax = (subtotal + deliveryFee) * (Number(data.tax_rate) || 0) / 100;
+                const tax = items.reduce((s, it) => {
+                    const amt = (Number(it.qty) || 0) * (Number(it.price) || 0);
+                    const rate = Number(it.tax_rate ?? data.tax_rate ?? 0);
+                    return s + amt * rate / 100;
+                }, 0);
                 const total = subtotal + deliveryFee + tax;
                 const balance = Math.max(0, total - (Number(data.paid) || 0));
                 const c = data.company || {};
@@ -5340,12 +5432,14 @@
         <th style="text-align:left;padding:8px 4px;font-size:11px;color:#7A6D65;">DESCRIPTION</th>
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;">QTY</th>
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;">PRICE</th>
+        ${tax > 0 ? `<th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;">TAX</th>` : ''}
         <th style="text-align:right;padding:8px 4px;font-size:11px;color:#7A6D65;">AMOUNT</th>
       </tr></thead>
       <tbody>${items.map(it => `<tr style="border-bottom:1px solid #E8E4D4;">
         <td style="padding:9px 4px;">${escapeHtml(it.name)}</td>
         <td style="padding:9px 4px;text-align:right;">${it.qty}${it.unit ? ' ' + escapeHtml(A.pluralizeUnit(it.unit, it.qty)) : ''}</td>
         <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price, data.currency)}</td>
+        ${tax > 0 ? `<td style="padding:9px 4px;text-align:right;font-family:monospace;">${Number(it.tax_rate ?? data.tax_rate ?? 0)}%</td>` : ''}
         <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price, data.currency)}</td>
       </tr>`).join('')}</tbody>
     </table>

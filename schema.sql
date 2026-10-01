@@ -16,6 +16,12 @@
 -- this file against a project that already has these functions just updates
 -- them in place.
 
+-- Per-line-item tax (each invoice line has its own tax rate, rather than one
+-- flat rate for the whole invoice). Run this BEFORE the updated
+-- get_invoice_public below, which reads this column directly — the function
+-- will fail to run on a project where it doesn't exist yet.
+ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS tax_rate numeric DEFAULT 0;
+
 -- Powers the public, login-free invoice tracking link ("?track=<token>").
 -- Returns one invoice's data, plus the business's live branding and payment
 -- details, by its unguessable tracking token — never a general query surface.
@@ -47,7 +53,7 @@ begin
     'customer_name', c.name,
     'customer_email', c.email,
     'items', (
-      select json_agg(json_build_object('name', it.name, 'qty', it.qty, 'price', it.price, 'unit', it.unit))
+      select json_agg(json_build_object('name', it.name, 'qty', it.qty, 'price', it.price, 'unit', it.unit, 'tax_rate', it.tax_rate))
       from invoice_items it where it.invoice_id = i.id
     ),
     'paid', coalesce((select sum(p.amount) from payments p where p.invoice_id = i.id), 0),
@@ -73,3 +79,11 @@ begin
   return result;
 end;
 $function$;
+
+-- sync_invoice_items (not included here yet): replaces an invoice's line
+-- items atomically on save. It needs a matching update so the `p_items`
+-- payload's `tax_rate` key (sent by index.html's persist()) actually gets
+-- written to invoice_items.tax_rate — ask Claude to fetch this function's
+-- current definition (`select pg_get_functiondef(oid) from pg_proc where
+-- proname = 'sync_invoice_items';`) next time it has a chance to patch it,
+-- the same way get_invoice_public was fixed above.
