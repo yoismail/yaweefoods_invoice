@@ -1001,7 +1001,7 @@
             color: var(--leaf-dark);
         }
 
-        .kpi-card .lbl .icon-badge {
+        .lbl .icon-badge {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -1011,7 +1011,7 @@
             flex-shrink: 0;
         }
 
-        .kpi-card .lbl .icon-badge svg.icon {
+        .lbl .icon-badge svg.icon {
             width: 14px;
             height: 14px;
             margin: 0;
@@ -1035,6 +1035,27 @@
         .icon-badge.ib-violet {
             background: rgba(142, 68, 173, .16);
             color: #8E44AD;
+        }
+
+        .icon-badge.ib-red {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .kpi-grid.cols-static>div {
+            padding: 0;
+        }
+
+        .kpi-grid.cols-static .lbl {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 10px;
         }
 
         .kpi-trend {
@@ -1874,9 +1895,11 @@
     <!-- ================= LOADING GATE ================= -->
     <div id="app-loading"
         style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#042500;">
-        <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:18px;">
+            <div class="yawee-logo-img" role="img" aria-label="Yo7"
+                style="width:44px;height:44px;animation:appLoadingPulse 1.6s ease-in-out infinite;"></div>
             <div
-                style="width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#90B800;animation:spin .8s linear infinite;">
+                style="width:26px;height:26px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#90B800;animation:spin .8s linear infinite;">
             </div>
         </div>
     </div>
@@ -1884,6 +1907,20 @@
         @keyframes spin {
             to {
                 transform: rotate(360deg);
+            }
+        }
+
+        @keyframes appLoadingPulse {
+
+            0%,
+            100% {
+                opacity: .55;
+                transform: scale(.96);
+            }
+
+            50% {
+                opacity: 1;
+                transform: scale(1);
             }
         }
     </style>
@@ -4386,11 +4423,11 @@
 
   <div class="card card-pad">
     <h3 style="margin:0 0 16px;font-size:15px;">Invoice summary</h3>
-    <div class="kpi-grid" style="margin-bottom:0;">
-      <div><div class="cell-muted" style="font-size:12px;">Outstanding balance</div><div class="display" style="font-size:20px;font-weight:700;">${money(totalOutstanding)}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">Draft</div><div class="display" style="font-size:20px;font-weight:700;">${draftCount}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">Paid (in range)</div><div class="display" style="font-size:20px;font-weight:700;">${paidCount}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">Overdue (in range)</div><div class="display" style="font-size:20px;font-weight:700;color:var(--danger);">${overdueCount}</div></div>
+    <div class="kpi-grid cols-static" style="margin-bottom:0;">
+      <div><div class="lbl"><span class="icon-badge ib-amber"><svg class="icon" data-feather="clock"></svg></span> Outstanding balance</div><div class="display" style="font-size:20px;font-weight:700;">${money(totalOutstanding)}</div></div>
+      <div><div class="lbl"><span class="icon-badge ib-blue"><svg class="icon" data-feather="file-text"></svg></span> Draft</div><div class="display" style="font-size:20px;font-weight:700;">${draftCount}</div></div>
+      <div><div class="lbl"><span class="icon-badge ib-leaf"><svg class="icon" data-feather="check-circle"></svg></span> Paid (in range)</div><div class="display" style="font-size:20px;font-weight:700;">${paidCount}</div></div>
+      <div><div class="lbl"><span class="icon-badge ib-red"><svg class="icon" data-feather="alert-triangle"></svg></span> Overdue (in range)</div><div class="display" style="font-size:20px;font-weight:700;color:var(--danger);">${overdueCount}</div></div>
     </div>
   </div>
 
@@ -4399,9 +4436,9 @@
       <h3 style="margin:0;font-size:15px;">Inventory</h3>
       <button class="btn sm ghost" data-action="export-inventory-csv" title="Download full inventory valuation as CSV"><svg class="icon" data-feather="download"></svg> CSV</button>
     </div>
-    <div class="kpi-grid" style="margin-bottom:20px;">
-      <div><div class="cell-muted" style="font-size:12px;">Stock value (current)</div><div class="display" style="font-size:20px;font-weight:700;">${money(totalStockValue)}</div></div>
-      <div><div class="cell-muted" style="font-size:12px;">At/below reorder point</div><div class="display" style="font-size:20px;font-weight:700;color:${lowStockProducts.length ? 'var(--danger)' : 'inherit'};">${lowStockProducts.length}</div></div>
+    <div class="kpi-grid cols-static" style="margin-bottom:20px;">
+      <div><div class="lbl"><span class="icon-badge ib-leaf"><svg class="icon" data-feather="trending-up"></svg></span> Stock value (current)</div><div class="display" style="font-size:20px;font-weight:700;">${money(totalStockValue)}</div></div>
+      <div><div class="lbl"><span class="icon-badge ${lowStockProducts.length ? 'ib-red' : 'ib-leaf'}"><svg class="icon" data-feather="alert-triangle"></svg></span> At/below reorder point</div><div class="display" style="font-size:20px;font-weight:700;color:${lowStockProducts.length ? 'var(--danger)' : 'inherit'};">${lowStockProducts.length}</div></div>
     </div>
     ${lowStockProducts.length ? `
     <div style="margin-bottom:22px;">
