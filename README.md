@@ -1,4 +1,4 @@
-# Yawee Foods: Wholesale Business Manager
+# Yo7: Wholesale Business Manager
 
 ![Status](https://img.shields.io/badge/status-active-2FAE60?style=flat-square)
 ![Type](https://img.shields.io/badge/type-single--page%20app-123B24?style=flat-square)
