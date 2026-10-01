@@ -133,13 +133,13 @@ The app is entirely client-driven. There is no custom backend server: Supabase's
 ## Getting started
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com), the free tier is sufficient to start.
-2. **Run the schema**: open the SQL Editor in your Supabase project and run the full contents of [`schema.sql`](./schema.sql). It's written to be safe to re-run any number of times.
-   - **Upgrading an existing deployment?** The branding feature needs two new columns on `settings`. Run this once:
+2. **Run the schema**: open the SQL Editor in your Supabase project and run the full contents of [`schema.sql`](./schema.sql). It's written to be safe to re-run any number of times. Note: this file currently only covers the `get_invoice_public` RPC function, not the full table/RLS schema — see the note at the top of the file.
+   - **Upgrading an existing deployment?** The branding feature needs two new columns on `settings`, plus the public tracking page's RPC function needs to actually return them. Run this once:
      ```sql
      ALTER TABLE settings ADD COLUMN IF NOT EXISTS logo_data_url text;
      ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_footer_message text;
      ```
-     If `get_invoice_public` is a Postgres function returning a fixed set of columns (rather than `select *`), also add `logo_data_url` and `invoice_footer_message` to the `company` object it returns, so the public tracking page can show them too.
+     Then re-run the `get_invoice_public` function from [`schema.sql`](./schema.sql) — it's a `CREATE OR REPLACE`, so running it updates the existing function in place. Without this step, the public tracking link keeps showing the generated initials badge and default thank-you message instead of your uploaded logo and footer message, even after you've saved them in Settings, since the function was never including those two columns in what it returns.
 3. **Get your project keys**: in Supabase, go to Settings, then API, and copy your Project URL and Publishable (anon) key.
 4. **Configure the app**: open `index.html` and paste your keys in at the top:
    ```js
@@ -157,7 +157,7 @@ The app is entirely client-driven. There is no custom backend server: Supabase's
 ```
 .
 ├── index.html      # The entire application: UI, logic, and styling
-└── schema.sql       # Database schema, RLS policies, and RPC functions
+└── schema.sql       # Verified RPC functions (currently just get_invoice_public); see the note at the top of the file
 ```
 
 ---
