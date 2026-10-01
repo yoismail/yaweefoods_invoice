@@ -1809,7 +1809,7 @@
                     <p class="sub">Set up access to your Yo7 Solutions account</p>
                     <form id="form-signup">
                         <div class="field"><label>Full name</label><input type="text" id="su-name"
-                                placeholder="Jane Okafor" required></div>
+                                placeholder="Jane Smith" required></div>
                         <div class="field"><label>Email address</label><input type="email" id="su-email"
                                 placeholder="you@example.com" required></div>
                         <div class="field"><label>Password</label><input type="password" id="su-password"
@@ -1946,9 +1946,22 @@
 
             /* ---------------- ID / formatting helpers ---------------- */
             function uid() { return crypto.randomUUID(); }
-            function money(n) {
+            function money(n, currencyOverride) {
                 const v = Number(n) || 0;
-                return '£' + v.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const currency = currencyOverride || (state.settings && state.settings.currency) || 'GBP';
+                try {
+                    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v);
+                } catch (e) {
+                    return currency + ' ' + v.toFixed(2);
+                }
+            }
+            function currencySymbol(currencyOverride) {
+                const currency = currencyOverride || (state.settings && state.settings.currency) || 'GBP';
+                try {
+                    return (0).toLocaleString(undefined, { style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace(/[0-9]/g, '').trim();
+                } catch (e) {
+                    return currency;
+                }
             }
             function fmtDate(iso) {
                 if (!iso) return '-';
@@ -2255,7 +2268,7 @@
 
             window.Yo7App = window.Yo7App || {};
             Object.assign(window.Yo7App, {
-                supabase, state, uid, money, fmtDate, todayISO, addDays, escapeHtml, initials, brandLogoHtml,
+                supabase, state, uid, money, currencySymbol, fmtDate, todayISO, addDays, escapeHtml, initials, brandLogoHtml,
                 loadAll, persist, logStockMovements, logActivity, toast, DEFAULT_SETTINGS, APP_BUILD
             });
 
@@ -2706,7 +2719,7 @@
     <div class="item-card-grid">
       <div><label>Qty</label><input class="item-qty" data-idx="${idx}" type="number" min="0" step="1" value="${item.qty}"></div>
       <div><label>Unit</label><input class="item-unit" data-idx="${idx}" type="text" value="${escapeHtml(item.unit || '')}" placeholder="unit" ${linkedProduct ? 'readonly' : ''}></div>
-      <div><label>Unit price (£)</label><input class="item-price" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></div>
+      <div><label>Unit price (${A.currencySymbol()})</label><input class="item-price" data-idx="${idx}" type="number" min="0" step="0.01" value="${item.price}"></div>
       <div><label>Amount</label><div class="amt-box">${money(amt)}</div></div>
     </div>
   </div>`;
@@ -2744,7 +2757,7 @@
   <button type="button" class="btn sm ghost" id="add-item"><svg class="icon" data-feather="plus"></svg> Add line item</button>
 
   <div class="totals-box">
-    <div class="field" style="margin:14px 0 6px;"><label>Delivery fee (£)</label><input id="f-delivery" type="number" min="0" step="0.01" value="${draft.deliveryFee || 0}"></div>
+    <div class="field" style="margin:14px 0 6px;"><label>Delivery fee (${A.currencySymbol()})</label><input id="f-delivery" type="number" min="0" step="0.01" value="${draft.deliveryFee || 0}"></div>
     <div class="field" style="margin:0 0 6px;"><label>Tax rate (%)</label><input id="f-taxrate" type="number" min="0" step="0.1" value="${draft.taxRate}"></div>
     <div class="tline"><span>Subtotal</span><span id="calc-subtotal" class="mono"></span></div>
     <div class="tline"><span>Delivery</span><span id="calc-delivery" class="mono"></span></div>
@@ -3382,12 +3395,12 @@
 
             function customerFormHtml(c) {
                 return `
-  <div class="field"><label>Business / contact name</label><input id="cf-name" type="text" value="${escapeHtml(c.name)}" placeholder="e.g. Kismet African Grocers"></div>
+  <div class="field"><label>Business / contact name</label><input id="cf-name" type="text" value="${escapeHtml(c.name)}" placeholder="e.g. Riverside Supplies Ltd"></div>
   <div class="row2">
-    <div class="field"><label>Email</label><input id="cf-email" type="email" value="${escapeHtml(c.email)}" placeholder="orders@example.co.uk"></div>
-    <div class="field"><label>Phone</label><input id="cf-phone" type="text" value="${escapeHtml(c.phone)}" placeholder="01206 000 000"></div>
+    <div class="field"><label>Email</label><input id="cf-email" type="email" value="${escapeHtml(c.email)}" placeholder="orders@example.com"></div>
+    <div class="field"><label>Phone</label><input id="cf-phone" type="text" value="${escapeHtml(c.phone)}" placeholder="01234 567890"></div>
   </div>
-  <div class="field"><label>Delivery / billing address</label><textarea id="cf-address" placeholder="Street, town, postcode">${escapeHtml(c.address)}</textarea></div>
+  <div class="field"><label>Delivery / billing address</label><textarea id="cf-address" placeholder="Street, city, postal code">${escapeHtml(c.address)}</textarea></div>
   <div class="field"><label>Notes</label><textarea id="cf-notes" placeholder="Order preferences, payment terms…">${escapeHtml(c.notes)}</textarea></div>
   `;
             }
@@ -3463,7 +3476,7 @@
                 return `
   <div class="kpi-grid cols-3" style="margin-bottom:20px;">
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="package"></svg> Products</div><div class="val">${state.products.length}</div></div>
-    <div class="card kpi-card"><div class="lbl"><span style="font-weight:800;font-size:15px;line-height:1;">£</span> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
+    <div class="card kpi-card"><div class="lbl"><span style="font-weight:800;font-size:15px;line-height:1;">${A.currencySymbol()}</span> Stock value</div><div class="val">${money(totalStockValue)}</div></div>
     <div class="card kpi-card"><div class="lbl"><svg class="icon" data-feather="alert-triangle"></svg> At/below reorder point</div><div class="val" style="${lowCount > 0 ? 'color:var(--danger);' : ''}">${lowCount}</div></div>
   </div>
   ${nearExpiryCount > 0 ? `<div class="card kpi-card" style="margin-bottom:20px;"><div class="lbl"><svg class="icon" data-feather="clock"></svg> Expiring within 30 days</div><div class="val" style="color:var(--danger);">${nearExpiryCount}</div></div>` : ''}
@@ -3523,16 +3536,16 @@
 
             function productFormHtml(p) {
                 return `
-  <div class="field"><label>Product name</label><input id="pf-name" type="text" value="${escapeHtml(p.name)}" placeholder="e.g. Palm Oil 5L"></div>
+  <div class="field"><label>Product name</label><input id="pf-name" type="text" value="${escapeHtml(p.name)}" placeholder="e.g. Wireless Mouse"></div>
   <div class="row2">
     <div class="field"><label>SKU</label><input id="pf-sku" type="text" value="${escapeHtml(p.sku)}" placeholder="e.g. SKU-0042"></div>
-    <div class="field"><label>Category</label><input id="pf-category" type="text" value="${escapeHtml(p.category)}" placeholder="Oils"></div>
+    <div class="field"><label>Category</label><input id="pf-category" type="text" value="${escapeHtml(p.category)}" placeholder="e.g. Accessories"></div>
   </div>
   <div class="row3">
-    <div class="field"><label>Price (£)</label><input id="pf-price" type="number" min="0" step="0.01" value="${p.price}"></div>
+    <div class="field"><label>Price (${A.currencySymbol()})</label><input id="pf-price" type="number" min="0" step="0.01" value="${p.price}"></div>
     <div class="field">
       <label>Unit</label>
-      <input id="pf-unit" type="text" value="${escapeHtml(p.unit)}" placeholder="box, case, bag, kg">
+      <input id="pf-unit" type="text" value="${escapeHtml(p.unit)}" placeholder="e.g. box, case, kg, hour">
       <div class="hint">How it's sold, shows on every invoice, e.g. "20 boxes" instead of just "20".</div>
     </div>
     <div class="field"><label>Reorder point</label><input id="pf-reorder" type="number" min="0" step="1" value="${p.reorderPoint ?? 10}">
@@ -3551,7 +3564,7 @@
   <div class="field"><label>Starting stock</label><input id="pf-stock" type="number" min="0" step="1" value="${p.stock}">
     <div class="hint">Logged as the opening stock count for this product.</div>
   </div>`}
-  <div class="field"><label>Description</label><textarea id="pf-desc" placeholder="Short product description, e.g. 'Sold in cases of 12, keep refrigerated'">${escapeHtml(p.description)}</textarea></div>
+  <div class="field"><label>Description</label><textarea id="pf-desc" placeholder="Short product description, e.g. 'Includes 1-year warranty'">${escapeHtml(p.description)}</textarea></div>
   `;
             }
             function openProductModal(existing) {
@@ -3605,8 +3618,7 @@
                 { id: 'restock', label: 'Restock (new delivery received)' },
                 { id: 'correction', label: 'Stock count correction' },
                 { id: 'damaged', label: 'Damaged / expired / written off' },
-                { id: 'supply_main_store', label: 'Supply Main Store (Colchester)' },
-                { id: 'supply_ipswich_store', label: 'Supply Ipswich Store' },
+                { id: 'transfer', label: 'Transferred to another location' },
                 { id: 'other', label: 'Other' },
             ];
             function openAdjustStockModal(product) {
@@ -3632,7 +3644,7 @@
                 });
                 document.getElementById('modal-cancel').addEventListener('click', closeModal);
                 document.getElementById('as-reason').addEventListener('change', (e) => {
-                    if (e.target.value === 'supply_main_store' || e.target.value === 'supply_ipswich_store') {
+                    if (e.target.value === 'transfer') {
                         document.getElementById('as-direction').value = 'remove';
                     }
                 });
@@ -3662,7 +3674,10 @@
             const STOCK_REASON_LABELS = {
                 invoice_sold: 'Sold on invoice', invoice_restored: 'Invoice edited/deleted',
                 restock: 'Restock', correction: 'Correction', damaged: 'Damaged/expired',
-                supply_main_store: 'Supply Main Store (Colchester)', supply_ipswich_store: 'Supply Ipswich Store',
+                transfer: 'Transferred to another location',
+                // Kept only so older history entries still show a readable label, no
+                // longer offered as choices in the adjust-stock reason dropdown.
+                supply_main_store: 'Transferred to another location', supply_ipswich_store: 'Transferred to another location',
                 other: 'Other', initial: 'Opening stock'
             };
             function openStockHistoryModal(product) {
@@ -3864,7 +3879,7 @@
                 return `
   <div class="field"><label>Invoice</label><select id="pf-invoice">${unpaid.length ? '<option value="">Select an invoice</option>' + options : '<option value="">No unpaid invoices</option>'}</select></div>
   <div class="row2">
-    <div class="field"><label>Amount (£)</label><input id="pf-amount" type="number" min="0" step="0.01" value="${draft.amount || ''}"></div>
+    <div class="field"><label>Amount (${A.currencySymbol()})</label><input id="pf-amount" type="number" min="0" step="0.01" value="${draft.amount || ''}"></div>
     <div class="field"><label>Date received</label><input id="pf-date" type="date" value="${draft.date}"></div>
   </div>
   <div class="field"><label>Method</label><select id="pf-method">
@@ -4271,7 +4286,8 @@
                     byCustomer[inv.customerId].paid += t.paid;
                     byCustomer[inv.customerId].outstanding += t.balance;
                 });
-                const rows = [['Customer', 'Email', 'Phone', 'Invoices', 'Revenue (GBP)', 'Paid (GBP)', 'Outstanding (GBP)']];
+                const cur1 = (state.settings && state.settings.currency) || 'GBP';
+                const rows = [['Customer', 'Email', 'Phone', 'Invoices', `Revenue (${cur1})`, `Paid (${cur1})`, `Outstanding (${cur1})`]];
                 Object.entries(byCustomer)
                     .map(([cid, stats]) => ({ c: customerById(cid), ...stats }))
                     .filter(r => r.c)
@@ -4293,7 +4309,8 @@
                         byProduct[it.name].revenue += (Number(it.qty) || 0) * (Number(it.price) || 0);
                     });
                 });
-                const rows = [['Product', 'Unit', 'Quantity sold', 'Revenue (GBP)']];
+                const cur2 = (state.settings && state.settings.currency) || 'GBP';
+                const rows = [['Product', 'Unit', 'Quantity sold', `Revenue (${cur2})`]];
                 Object.entries(byProduct)
                     .sort((a, b) => b[1].revenue - a[1].revenue)
                     .forEach(([name, s]) => rows.push([name, s.unit, s.qty, s.revenue.toFixed(2)]));
@@ -4305,7 +4322,8 @@
             A.exportProductsCsv = exportProductsCsv;
 
             function exportInventoryCsv() {
-                const rows = [['Product', 'SKU', 'Category', 'Unit', 'Stock', 'Reorder point', 'Expiry date', 'Unit price (GBP)', 'Stock value (GBP)']];
+                const cur = (state.settings && state.settings.currency) || 'GBP';
+                const rows = [['Product', 'SKU', 'Category', 'Unit', 'Stock', 'Reorder point', 'Expiry date', `Unit price (${cur})`, `Stock value (${cur})`]];
                 [...state.products].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => {
                     const value = (Number(p.stock) || 0) * (Number(p.price) || 0);
                     rows.push([p.name, p.sku || '', p.category || '', p.unit || '', p.stock, p.reorderPoint ?? 10, p.expiryDate || '', (Number(p.price) || 0).toFixed(2), value.toFixed(2)]);
@@ -4414,7 +4432,7 @@
       <h3>Payment details</h3>
       <p class="desc">Shown on every invoice so customers know where to pay. Leave any or all of these blank and the section won't appear on your invoices at all.</p>
       <div class="row2">
-        <div class="field"><label>Bank name</label><input id="st-bank-name" type="text" value="${escapeHtml(s.bankName || '')}" placeholder="e.g. Barclays"></div>
+        <div class="field"><label>Bank name</label><input id="st-bank-name" type="text" value="${escapeHtml(s.bankName || '')}" placeholder="e.g. Example Bank"></div>
         <div class="field"><label>Account holder</label><input id="st-account-holder" type="text" value="${escapeHtml(s.accountHolder || '')}" placeholder="e.g. Acme Trading Ltd"></div>
       </div>
       <div class="row3">
@@ -4435,10 +4453,10 @@
       <div class="row2">
         <div class="field"><label>Invoice number prefix</label><input id="st-prefix" type="text" value="${escapeHtml(s.invoicePrefix)}"></div>
         <div class="field"><label>Currency</label>
-          <select id="st-currency"><option ${s.currency === 'GBP' ? 'selected' : ''}>GBP</option><option ${s.currency === 'EUR' ? 'selected' : ''}>EUR</option><option ${s.currency === 'USD' ? 'selected' : ''}>USD</option></select>
+          <select id="st-currency">${['USD', 'GBP', 'EUR', 'NGN', 'GHS', 'ZAR', 'KES', 'CAD', 'AUD', 'INR'].map(c => `<option ${s.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
         </div>
       </div>
-      <div class="field hint" style="margin-top:-6px;">The app displays amounts in £ throughout regardless of this setting, which is stored for your records.</div>
+      <div class="field hint" style="margin-top:-6px;">Changes the currency symbol shown throughout the app and on invoices.</div>
       <button class="btn primary" id="save-tax">Save tax &amp; invoicing settings</button>
     </div>
 
@@ -5036,7 +5054,7 @@
                 const root = document.createElement('div');
                 root.id = 'public-invoice';
                 root.style.cssText = 'min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;background:#FAF9F2;';
-                root.innerHTML = '<div style="max-width:720px;width:100%;background:#fff;border-radius:14px;padding:40px;box-shadow:0 12px 40px rgba(12,42,25,.12);">Loading invoice…</div>';
+                root.innerHTML = '<div style="max-width:720px;width:100%;background:#fff;color:#16210D;border-radius:14px;padding:40px;box-shadow:0 12px 40px rgba(12,42,25,.12);">Loading invoice…</div>';
                 document.body.appendChild(root);
 
                 if (!supabase) { root.firstElementChild.textContent = 'This link needs the site owner to connect Supabase.'; return; }
@@ -5092,16 +5110,16 @@
       <tbody>${items.map(it => `<tr style="border-bottom:1px solid #E8E4D4;">
         <td style="padding:9px 4px;">${escapeHtml(it.name)}</td>
         <td style="padding:9px 4px;text-align:right;">${it.qty}${it.unit ? ' ' + escapeHtml(A.pluralizeUnit(it.unit, it.qty)) : ''}</td>
-        <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price)}</td>
-        <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price)}</td>
+        <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.price, data.currency)}</td>
+        <td style="padding:9px 4px;text-align:right;font-family:monospace;">${money(it.qty * it.price, data.currency)}</td>
       </tr>`).join('')}</tbody>
     </table>
     <div style="margin-left:auto;width:240px;">
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(subtotal)}</span></div>
-      ${deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(deliveryFee)}</span></div>` : ''}
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax</span><span style="font-family:monospace;">${money(tax)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #063B00;margin-top:4px;font-weight:700;font-size:15px;"><span>Total</span><span style="font-family:monospace;">${money(total)}</span></div>
-      ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;color:#C0392B;"><span>Balance due</span><span style="font-family:monospace;">${money(balance)}</span></div>` : `<div style="padding:6px 0;font-size:13px;font-weight:700;color:#729400;">Paid in full</div>`}
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Subtotal</span><span style="font-family:monospace;">${money(subtotal, data.currency)}</span></div>
+      ${deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Delivery</span><span style="font-family:monospace;">${money(deliveryFee, data.currency)}</span></div>` : ''}
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>Tax</span><span style="font-family:monospace;">${money(tax, data.currency)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #063B00;margin-top:4px;font-weight:700;font-size:15px;"><span>Total</span><span style="font-family:monospace;">${money(total, data.currency)}</span></div>
+      ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;font-weight:700;color:#C0392B;"><span>Balance due</span><span style="font-family:monospace;">${money(balance, data.currency)}</span></div>` : `<div style="padding:6px 0;font-size:13px;font-weight:700;color:#729400;">Paid in full</div>`}
     </div>
     ${(data.payments && data.payments.length) ? `
     <div style="margin-top:24px;border-top:1px solid #E8E4D4;padding-top:14px;">
@@ -5111,7 +5129,7 @@
           ${data.payments.map(p => `<tr>
             <td style="padding:4px 4px 4px 0;font-size:12.5px;color:#6B5F58;">${fmtDate(p.date)}</td>
             <td style="padding:4px;font-size:12.5px;color:#6B5F58;">${escapeHtml(p.method || '')}</td>
-            <td style="padding:4px 0 4px 4px;font-size:12.5px;text-align:right;font-family:monospace;">${money(p.amount)}</td>
+            <td style="padding:4px 0 4px 4px;font-size:12.5px;text-align:right;font-family:monospace;">${money(p.amount, data.currency)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
