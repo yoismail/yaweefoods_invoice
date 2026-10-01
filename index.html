@@ -1863,6 +1863,13 @@
         const SUPABASE_URL = "https://dczklcojhfjojmgxeitv.supabase.co";   // Settings > API > Project URL
         const SUPABASE_ANON_KEY = "sb_publishable_QFw3lC2C9bHA7hGX0f__og_23NlIWC5";  // Settings > API Keys > Publishable key
 
+        // Declared at the top level (not inside any of the IIFEs below) so it's
+        // in scope wherever an invoice is rendered, regardless of which IIFE
+        // that happens to live in.
+        function yo7WatermarkDataUri() {
+            return 'data:image/png;base64,' + window.YO7_WATERMARK_B64;
+        }
+
         (function () {
             "use strict";
 
@@ -1916,9 +1923,6 @@
             }
             function initials(name) {
                 return (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-            }
-            function yo7WatermarkDataUri() {
-                return 'data:image/png;base64,' + window.YO7_WATERMARK_B64;
             }
 
             /* ---------------- App state ---------------- */
