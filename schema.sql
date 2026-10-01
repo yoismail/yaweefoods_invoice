@@ -80,10 +80,31 @@ begin
 end;
 $function$;
 
--- sync_invoice_items (not included here yet): replaces an invoice's line
--- items atomically on save. It needs a matching update so the `p_items`
--- payload's `tax_rate` key (sent by index.html's persist()) actually gets
--- written to invoice_items.tax_rate — ask Claude to fetch this function's
--- current definition (`select pg_get_functiondef(oid) from pg_proc where
--- proname = 'sync_invoice_items';`) next time it has a chance to patch it,
--- the same way get_invoice_public was fixed above.
+-- Replaces an invoice's line items atomically on every save (see
+-- adjustStockForInvoiceChange / persist() in index.html): deletes the old
+-- rows and re-inserts the new set in one transaction, so a failed write can
+-- never leave an invoice's items deleted without their replacement landing.
+-- Extracts each JSON key by name rather than mapping the object onto the
+-- table's columns directly, so an unrecognised key in p_items (as tax_rate
+-- was, before this function knew about it) is harmlessly ignored rather than
+-- erroring — that's what let the app send tax_rate ahead of this fix without
+-- breaking invoice saves in the meantime.
+CREATE OR REPLACE FUNCTION public.sync_invoice_items(p_invoice_id uuid, p_items jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+begin
+  delete from invoice_items where invoice_id = p_invoice_id;
+  insert into invoice_items (invoice_id, product_id, name, qty, price, unit, tax_rate)
+  select
+    p_invoice_id,
+    nullif(item->>'product_id','')::uuid,
+    item->>'name',
+    (item->>'qty')::numeric,
+    (item->>'price')::numeric,
+    coalesce(item->>'unit',''),
+    coalesce((item->>'tax_rate')::numeric, 0)
+  from jsonb_array_elements(p_items) as item;
+end;
+$function$;
