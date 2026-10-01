@@ -1058,6 +1058,84 @@
             color: var(--danger);
         }
 
+        /* ---------- Onboarding banner ---------- */
+        .onboarding-banner {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 22px;
+            margin-bottom: 20px;
+            border-radius: var(--radius);
+            background: linear-gradient(120deg, var(--forest-3), var(--forest) 70%, var(--leaf-dark));
+            color: #fff;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .onboarding-banner .icon-badge {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, .14);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .onboarding-banner .icon-badge svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .onboarding-banner h3 {
+            margin: 0 0 3px;
+            font-size: 15px;
+        }
+
+        .onboarding-banner p {
+            margin: 0;
+            font-size: 13px;
+            color: #D7E6A8;
+        }
+
+        .onboarding-banner .btn {
+            flex-shrink: 0;
+            background: #fff;
+            color: var(--forest-3);
+            border: none;
+        }
+
+        .onboarding-banner .btn:hover {
+            background: #F0F7DC;
+        }
+
+        .onboarding-close {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            color: rgba(255, 255, 255, .7);
+            border: none;
+            flex-shrink: 0;
+        }
+
+        .onboarding-close:hover {
+            background: rgba(255, 255, 255, .14);
+            color: #fff;
+        }
+
+        .onboarding-close svg {
+            width: 15px;
+            height: 15px;
+        }
+
         /* ---------- Tables ---------- */
         .table-wrap {
             overflow-x: auto;
@@ -2586,7 +2664,21 @@
                     trendHtml = `<span class="kpi-trend up">▲ New</span>`;
                 }
 
+                let onboardingDismissed = false;
+                try { onboardingDismissed = localStorage.getItem('yo7_onboarding_dismissed') === '1'; } catch (e) { }
+                const showOnboarding = !state.settings.companyName && !onboardingDismissed;
+
                 return `
+  ${showOnboarding ? `
+  <div class="onboarding-banner">
+    <div class="icon-badge"><svg data-feather="compass"></svg></div>
+    <div style="flex:1;min-width:0;">
+      <h3>Make this app yours</h3>
+      <p>Add your company name, logo and contact details so your invoices and the whole app are branded for your business, not ours.</p>
+    </div>
+    <button type="button" class="btn" data-nav="settings">Go to Settings</button>
+    <button type="button" class="onboarding-close" id="onboarding-dismiss" aria-label="Dismiss"><svg data-feather="x"></svg></button>
+  </div>` : ''}
   <div class="kpi-grid">
     <div class="card kpi-card">
       <div class="lbl"><span class="icon-badge ib-leaf"><svg class="icon" data-feather="trending-up"></svg></span> Total revenue</div>
@@ -2685,6 +2777,14 @@
                     const target = Number(el.dataset.countup) || 0;
                     animateCountUp(el, target, el.dataset.countupType);
                 });
+                const dismissBtn = document.getElementById('onboarding-dismiss');
+                if (dismissBtn) {
+                    dismissBtn.addEventListener('click', () => {
+                        try { localStorage.setItem('yo7_onboarding_dismissed', '1'); } catch (e) { }
+                        dismissBtn.closest('.onboarding-banner')?.remove();
+                    });
+                }
+                if (window.feather) feather.replace();
             };
 
         })();
