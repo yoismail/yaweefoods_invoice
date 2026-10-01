@@ -1001,7 +1001,7 @@
             color: var(--leaf-dark);
         }
 
-        .lbl .icon-badge {
+        .icon-badge {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -1011,7 +1011,7 @@
             flex-shrink: 0;
         }
 
-        .lbl .icon-badge svg.icon {
+        .icon-badge svg.icon {
             width: 14px;
             height: 14px;
             margin: 0;
@@ -1643,6 +1643,9 @@
         .settings-section h3 {
             font-size: 14.5px;
             margin: 0 0 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         .settings-section p.desc {
@@ -4627,7 +4630,7 @@
                 return `
   <div class="settings-grid">
     <div class="card card-pad settings-section">
-      <h3>Company details</h3>
+      <h3><span class="icon-badge ib-leaf"><svg class="icon" data-feather="briefcase"></svg></span> Company details</h3>
       <p class="desc">Your brand, shown on invoices and throughout the app.</p>
       <div class="logo-upload-row">
         <div class="logo-preview" id="st-logo-preview">${A.brandLogoHtml(s, 48)}</div>
@@ -4650,7 +4653,7 @@
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Low stock alerts</h3>
+      <h3><span class="icon-badge ib-amber"><svg class="icon" data-feather="bell"></svg></span> Low stock alerts</h3>
       <p class="desc">Where to send a WhatsApp alert when products fall to or below their reorder point.</p>
       <div class="field">
         <label>Manager's WhatsApp number</label>
@@ -4661,7 +4664,7 @@
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Payment details</h3>
+      <h3><span class="icon-badge ib-blue"><svg class="icon" data-feather="credit-card"></svg></span> Payment details</h3>
       <p class="desc">Shown on every invoice so customers know where to pay. Leave any or all of these blank and the section won't appear on your invoices at all.</p>
       <div class="row2">
         <div class="field"><label>Bank name</label><input id="st-bank-name" type="text" value="${escapeHtml(s.bankName || '')}" placeholder="e.g. Example Bank"></div>
@@ -4676,7 +4679,7 @@
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Tax &amp; invoicing</h3>
+      <h3><span class="icon-badge ib-violet"><svg class="icon" data-feather="percent"></svg></span> Tax &amp; invoicing</h3>
       <p class="desc">Applied to new invoices by default.</p>
       <div class="row2">
         <div class="field"><label>Default tax rate (%)</label><input id="st-taxrate" type="number" min="0" step="0.1" value="${s.taxRate}"></div>
@@ -4693,7 +4696,7 @@
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Team</h3>
+      <h3><span class="icon-badge ib-leaf"><svg class="icon" data-feather="users"></svg></span> Team</h3>
       <p class="desc">Everyone here sees the exact same customers, invoices, stock and payments, nothing is split up per person. Every action anyone takes is recorded on the Activity page with their name attached.</p>
       <div id="users-list">
         ${s.users.map(u => `<div class="user-row">
@@ -4719,7 +4722,7 @@
     </div>
 
     <div class="card card-pad settings-section">
-      <h3>Preferences</h3>
+      <h3><span class="icon-badge ib-blue"><svg class="icon" data-feather="sliders"></svg></span> Preferences</h3>
       <p class="desc">General app behaviour.</p>
       <div class="field">
         <label>Data storage</label>
