@@ -148,7 +148,7 @@
 
         ::selection {
             background: var(--leaf-light);
-            color: var(--forest-3);
+            color: var(--ink);
         }
 
         svg.icon {
@@ -649,7 +649,7 @@
             align-items: center;
             justify-content: center;
             gap: 10px;
-            margin-bottom: 28px;
+            margin-bottom: 10px;
         }
 
         .login-mobile-brand .yawee-logo-img {
@@ -661,7 +661,16 @@
             font-family: 'Montserrat Alternates', sans-serif;
             font-weight: 700;
             font-size: 16.5px;
-            color: var(--forest-3);
+            color: var(--ink);
+        }
+
+        .login-mobile-desc {
+            display: none;
+            text-align: center;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--muted);
+            margin: 0 0 28px;
         }
 
         .login-form>p.sub {
@@ -1610,6 +1619,10 @@
                 display: flex;
             }
 
+            .login-mobile-desc {
+                display: block;
+            }
+
             .login-form-wrap {
                 padding: 32px 24px;
             }
@@ -1770,6 +1783,7 @@
                     <div class="yawee-logo-img" role="img" aria-label="Yo7"></div>
                     <span>Yo7 Solutions</span>
                 </div>
+                <p class="login-mobile-desc">Invoicing and business management, branded as your own from the moment you sign in.</p>
                 <div id="login-error" class="login-error"></div>
                 <div id="login-toast" class="login-toast"></div>
 
