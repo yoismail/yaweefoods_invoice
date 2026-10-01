@@ -637,6 +637,7 @@
         .login-form {
             width: 100%;
             max-width: 380px;
+            animation: contentIn .4s ease;
         }
 
         .login-form h2 {
@@ -1000,6 +1001,63 @@
             color: var(--leaf-dark);
         }
 
+        .kpi-card .lbl .icon-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .kpi-card .lbl .icon-badge svg.icon {
+            width: 14px;
+            height: 14px;
+            margin: 0;
+        }
+
+        .icon-badge.ib-leaf {
+            background: rgba(144, 184, 0, .16);
+            color: var(--leaf-dark);
+        }
+
+        .icon-badge.ib-amber {
+            background: rgba(217, 142, 12, .16);
+            color: #C17D00;
+        }
+
+        .icon-badge.ib-blue {
+            background: rgba(29, 95, 168, .16);
+            color: #1D5FA8;
+        }
+
+        .icon-badge.ib-violet {
+            background: rgba(142, 68, 173, .16);
+            color: #8E44AD;
+        }
+
+        .kpi-trend {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-weight: 700;
+            padding: 1px 7px;
+            border-radius: 999px;
+            font-size: 11px;
+            margin-right: 6px;
+        }
+
+        .kpi-trend.up {
+            background: var(--leaf-light);
+            color: var(--leaf-dark);
+        }
+
+        .kpi-trend.down {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
         /* ---------- Tables ---------- */
         .table-wrap {
             overflow-x: auto;
@@ -1061,12 +1119,16 @@
             color: var(--muted);
         }
 
-        .empty-state svg {
+        .empty-state > svg {
             width: 38px;
             height: 38px;
             stroke-width: 1.4;
-            color: var(--muted-2);
-            margin-bottom: 12px;
+            color: var(--leaf-dark);
+            margin-bottom: 14px;
+            padding: 16px;
+            box-sizing: content-box;
+            border-radius: 50%;
+            background: var(--leaf-light);
         }
 
         .empty-state h3 {
@@ -2511,26 +2573,39 @@
                 const dueReminders = [...state.reminders].filter(r => r.status === 'Pending').sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')).slice(0, 5);
                 const stockRows = [...state.products].sort((a, b) => Number(a.stock) - Number(b.stock)).slice(0, 6);
 
+                const d30 = new Date(); d30.setDate(d30.getDate() - 30);
+                const d60 = new Date(); d60.setDate(d60.getDate() - 60);
+                const iso30 = d30.toISOString().slice(0, 10), iso60 = d60.toISOString().slice(0, 10);
+                const curPeriodRevenue = state.invoices.filter(i => i.status !== 'Cancelled' && (i.issueDate || '') >= iso30).reduce((s, i) => s + invoiceTotals(i).total, 0);
+                const prevPeriodRevenue = state.invoices.filter(i => i.status !== 'Cancelled' && (i.issueDate || '') >= iso60 && (i.issueDate || '') < iso30).reduce((s, i) => s + invoiceTotals(i).total, 0);
+                let trendHtml = '';
+                if (prevPeriodRevenue > 0) {
+                    const pct = Math.round(((curPeriodRevenue - prevPeriodRevenue) / prevPeriodRevenue) * 100);
+                    if (pct !== 0) trendHtml = `<span class="kpi-trend ${pct > 0 ? 'up' : 'down'}">${pct > 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span>`;
+                } else if (curPeriodRevenue > 0) {
+                    trendHtml = `<span class="kpi-trend up">▲ New</span>`;
+                }
+
                 return `
   <div class="kpi-grid">
     <div class="card kpi-card">
-      <div class="lbl"><svg class="icon" data-feather="trending-up"></svg> Total revenue</div>
-      <div class="val">${money(totalRevenue)}</div>
-      <div class="delta">Across ${state.invoices.filter(i => i.status !== 'Cancelled').length} invoices</div>
+      <div class="lbl"><span class="icon-badge ib-leaf"><svg class="icon" data-feather="trending-up"></svg></span> Total revenue</div>
+      <div class="val"><span data-countup="${totalRevenue}" data-countup-type="money">${money(totalRevenue)}</span></div>
+      <div class="delta">${trendHtml}Across ${state.invoices.filter(i => i.status !== 'Cancelled').length} invoices</div>
     </div>
     <div class="card kpi-card accent">
-      <div class="lbl"><svg class="icon" data-feather="clock"></svg> Outstanding</div>
-      <div class="val">${money(outstanding)}</div>
+      <div class="lbl"><span class="icon-badge ib-amber"><svg class="icon" data-feather="clock"></svg></span> Outstanding</div>
+      <div class="val"><span data-countup="${outstanding}" data-countup-type="money">${money(outstanding)}</span></div>
       <div class="delta">${overdueCount} overdue invoice${overdueCount === 1 ? '' : 's'}</div>
     </div>
     <div class="card kpi-card">
-      <div class="lbl"><svg class="icon" data-feather="users"></svg> Customers</div>
-      <div class="val">${state.customers.length}</div>
+      <div class="lbl"><span class="icon-badge ib-blue"><svg class="icon" data-feather="users"></svg></span> Customers</div>
+      <div class="val"><span data-countup="${state.customers.length}" data-countup-type="int">${state.customers.length}</span></div>
       <div class="delta">${state.products.length} products listed</div>
     </div>
     <div class="card kpi-card">
-      <div class="lbl"><svg class="icon" data-feather="bell"></svg> Reminders due</div>
-      <div class="val">${pendingReminders}</div>
+      <div class="lbl"><span class="icon-badge ib-violet"><svg class="icon" data-feather="bell"></svg></span> Reminders due</div>
+      <div class="val"><span data-countup="${pendingReminders}" data-countup-type="int">${pendingReminders}</span></div>
       <div class="delta">Pending action</div>
     </div>
   </div>
@@ -2590,6 +2665,26 @@
     `).join('') : `<div class="empty-state" style="padding:20px;"><p>Add products to start tracking stock.</p></div>`}
   </div>
   `;
+            };
+
+            function animateCountUp(el, target, type) {
+                const duration = 700;
+                const start = performance.now();
+                function frame(now) {
+                    const t = Math.min(1, (now - start) / duration);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    const val = target * eased;
+                    el.textContent = type === 'money' ? money(val) : Math.round(val).toLocaleString();
+                    if (t < 1) requestAnimationFrame(frame);
+                    else el.textContent = type === 'money' ? money(target) : target.toLocaleString();
+                }
+                requestAnimationFrame(frame);
+            }
+            A.afterRender.dashboard = function () {
+                document.querySelectorAll('.kpi-card .val [data-countup]').forEach(el => {
+                    const target = Number(el.dataset.countup) || 0;
+                    animateCountUp(el, target, el.dataset.countupType);
+                });
             };
 
         })();
