@@ -6,7 +6,7 @@
 ![Backend](https://img.shields.io/badge/backend-Supabase-3ECF8E?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
 
-A single-file invoicing and business management app built for **Yawee Foods Limited**, a wholesale African and Caribbean grocery distributor based in Colchester, Essex. It handles the day-to-day of running the business: raising invoices, tracking stock, recording payments, following up on customers, and reporting on revenue, shared across everyone on the team, with every action attributed to whoever did it.
+A single-file invoicing and business management app built for **Yo7 Foods Limited**, a wholesale African and Caribbean grocery distributor based in Colchester, Essex. It handles the day-to-day of running the business: raising invoices, tracking stock, recording payments, following up on customers, and reporting on revenue, shared across everyone on the team, with every action attributed to whoever did it.
 
 > Built as a real production tool for the business, and as a portfolio piece demonstrating a full client-side app backed by a properly secured, multi-user Postgres database.
 
