@@ -4247,6 +4247,18 @@
                     }
                     if (!await persist('payments')) return;
                     const inv = invoiceById(draft.invoiceId);
+                    // A Draft invoice's status is never auto-derived from its balance (see
+                    // invoiceStatus), so without this it would stay "Draft" forever even
+                    // once fully paid. Recording a real payment against one means it's no
+                    // longer just a draft, so move it to Sent, letting invoiceStatus then
+                    // correctly show Paid, Overdue or Sent from here on same as any other
+                    // invoice, including if this payment is later edited or deleted.
+                    let invoiceAutoSent = false;
+                    if (inv && inv.status === 'Draft') {
+                        inv.status = 'Sent';
+                        invoiceAutoSent = true;
+                        await persist('invoices', { itemIdsToSync: [] });
+                    }
                     await A.logActivity('payment', draft.id, inv ? inv.number : '', isEdit ? 'updated' : 'created',
                         isEdit
                             ? A.summarizeChanges(A.diffSummary(existingPayment, draft, [
@@ -4254,6 +4266,9 @@
                                 { key: 'method', label: 'Method' }, { key: 'note', label: 'Note' },
                             ]))
                             : `Recorded payment of ${money(draft.amount)} via ${draft.method}`);
+                    if (invoiceAutoSent) {
+                        await A.logActivity('invoice', inv.id, inv.number, 'status_changed', 'Automatically moved from Draft to Sent after a payment was recorded');
+                    }
                     toast(isEdit ? 'Payment updated.' : 'Payment recorded.');
                     closeModal();
                     A.render();
