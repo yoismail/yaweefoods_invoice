@@ -3017,7 +3017,8 @@
       <div class="field"><label>Email</label><input id="nc-email" type="email" value="${escapeHtml(nc.email || '')}" placeholder="orders@example.com"></div>
       <div class="field"><label>Phone</label><input id="nc-phone" type="text" value="${escapeHtml(nc.phone || '')}" placeholder="01234 567890"></div>
     </div>
-    <div class="hint" style="margin-top:-4px;">Saved as a new customer when you create this invoice. Add their address or notes afterwards from the Customers page.</div>
+    <div class="field" style="margin-bottom:0;"><label>Delivery / billing address</label><textarea id="nc-address" placeholder="Street, city, postal code">${escapeHtml(nc.address || '')}</textarea></div>
+    <div class="hint">Saved as a new customer when you create this invoice. Add notes afterwards from the Customers page.</div>
   </div>
   <div class="row2">
     <div class="field"><label>Issue date</label><input id="f-issue" type="date" value="${draft.issueDate}"></div>
@@ -3049,6 +3050,7 @@
                         name: document.getElementById('nc-name').value.trim(),
                         email: document.getElementById('nc-email').value.trim(),
                         phone: document.getElementById('nc-phone').value.trim(),
+                        address: document.getElementById('nc-address').value.trim(),
                     };
                 } else {
                     draft._newCustomer = null;
@@ -3083,7 +3085,7 @@
                 document.getElementById('f-customer').addEventListener('change', (e) => {
                     const row = document.getElementById('new-customer-row');
                     if (e.target.value === '__new__') {
-                        draft._newCustomer = draft._newCustomer || { name: '', email: '', phone: '' };
+                        draft._newCustomer = draft._newCustomer || { name: '', email: '', phone: '', address: '' };
                         row.style.display = '';
                         document.getElementById('nc-name').focus();
                     } else {
@@ -3201,13 +3203,13 @@
 
                     // Picking "+ Add new customer" rather than an existing one, the same
                     // way a custom line item becomes a real product, becomes a real
-                    // customer automatically, so it's there to add an address or notes to
-                    // on the Customers page afterwards.
+                    // customer automatically, so it's there to add notes to on the
+                    // Customers page afterwards.
                     if (finalDraft.customerId === '__new__' && finalDraft._newCustomer) {
                         const nc = finalDraft._newCustomer;
                         const newCustomer = {
                             id: uid(), name: nc.name.trim(), email: nc.email || '', phone: nc.phone || '',
-                            address: '', notes: '', createdAt: todayISO()
+                            address: nc.address || '', notes: '', createdAt: todayISO()
                         };
                         state.customers.push(newCustomer);
                         await persist('customers');
